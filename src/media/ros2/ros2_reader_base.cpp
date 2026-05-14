@@ -22,7 +22,8 @@ namespace librealsense
         try
         {
             reset();
-            m_total_duration = get_file_duration();
+            m_total_duration    = get_file_duration();
+            _first_timestamp_ns = _storage->get_metadata().starting_time.time_since_epoch().count();
         }
         catch (const std::exception& e)
         {
@@ -110,7 +111,7 @@ namespace librealsense
         if (frame_content_size == ZSTD_CONTENTSIZE_UNKNOWN || frame_content_size == ZSTD_CONTENTSIZE_ERROR)
             throw std::runtime_error("Failed to determine decompressed size for zstd-compressed message");
 
-        // Guard against malformed frames claiming an absurd decompressed size — zstd's frame
+        // Guard against malformed frames claiming an absurd decompressed size â€” zstd's frame
         // header is untrusted input and a malicious file could request a huge allocation.
         constexpr size_t MAX_DECOMPRESSED_SIZE = 256 * 1024 * 1024; // 256 MB
         if (frame_content_size > MAX_DECOMPRESSED_SIZE)
@@ -121,7 +122,7 @@ namespace librealsense
 
         // We create a new buffer for the decompressed data each time. We could use
         // a reusable member buffer like the writer does, but here the frame data may
-        // still be in use when the metadata is read next and overwrite it — allowing
+        // still be in use when the metadata is read next and overwrite it â€” allowing
         // it to reallocate for simplicity for now.
         auto out = create_buffer(decompressed_size);
 
@@ -153,8 +154,8 @@ namespace librealsense
 
     void ros2_reader_base::seek_to_time(const nanoseconds& seek_time)
     {
-        // read all messages up to the requested time, updating the last frame is done inside the read function
-
+        // walk forward and stash the first message at/after seek_time in the cache;
+        // read_next_cached() will return it as the next frame.
         if (seek_time > m_total_duration)
         {
             throw invalid_value_exception( rsutils::string::from()
@@ -164,11 +165,18 @@ namespace librealsense
 
         reset();
 
-        auto msg = peek_next_cached();
-        while (msg && nanoseconds(static_cast<int64_t>(msg->time_stamp) - _first_timestamp_ns) < seek_time)
+        // not using the cached-based functions, to avoid decompressing every frame (when relevant) and making seek very slow
+        while (_storage->has_next())
         {
-            read_next_cached();
-            msg = peek_next_cached();
+            auto msg = _storage->read_next();
+            if (!msg) continue;
+            if (nanoseconds(static_cast<int64_t>(msg->time_stamp) - _first_timestamp_ns) >= seek_time)
+            {
+                decompress_if_needed(msg);
+                _cached_message = msg;
+                _cache_valid = true;
+                return;
+            }
         }
     }
 
@@ -232,7 +240,7 @@ namespace librealsense
             return frame_holder{};
         }
 
-        // Move the deserialized data directly — avoids a full memcpy of image data
+        // Move the deserialized data directly â€” avoids a full memcpy of image data
         auto base_frame = static_cast<librealsense::frame*>(frame);
         base_frame->data = std::move(data);
 
