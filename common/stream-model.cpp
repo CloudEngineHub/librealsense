@@ -1005,9 +1005,12 @@ namespace rs2
         if (pid == "0B6B")
             add_d585S_metadata_descriptions(descriptions);
         
-        std::string connection_type =  this->dev->dev.get_info(RS2_CAMERA_INFO_CONNECTION_TYPE);
-        if (connection_type == "DDS")
-            add_dds_metadata_descriptions(descriptions);
+        if (this->dev->dev.supports(RS2_CAMERA_INFO_CONNECTION_TYPE))
+        {
+            std::string connection_type = this->dev->dev.get_info(RS2_CAMERA_INFO_CONNECTION_TYPE);
+            if (connection_type == "DDS")
+                add_dds_metadata_descriptions(descriptions);
+        }
 
         for (auto i = 0; i < RS2_FRAME_METADATA_COUNT; i++)
         {
