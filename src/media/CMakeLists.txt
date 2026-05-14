@@ -33,6 +33,8 @@ if(BUILD_ROSBAG2)
             "${CMAKE_CURRENT_LIST_DIR}/ros2/ros2_file_format.h"
             "${CMAKE_CURRENT_LIST_DIR}/ros2/ros2_writer.h"
             "${CMAKE_CURRENT_LIST_DIR}/ros2/ros2_writer.cpp"
+            "${CMAKE_CURRENT_LIST_DIR}/ros2/ros2_reader_base.h"
+            "${CMAKE_CURRENT_LIST_DIR}/ros2/ros2_reader_base.cpp"
             "${CMAKE_CURRENT_LIST_DIR}/ros2/ros2_reader.h"
             "${CMAKE_CURRENT_LIST_DIR}/ros2/ros2_reader.cpp"
             "${CMAKE_CURRENT_LIST_DIR}/ros2/ros2_native_reader.h"
