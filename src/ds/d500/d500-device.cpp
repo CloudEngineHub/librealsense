@@ -384,6 +384,12 @@ namespace librealsense
         init( dev_info->get_context(), dev_info->get_group() );
     }
 
+    d500_device::~d500_device()
+    {
+        if( _device_alive )
+            _device_alive->store( false );
+    }
+
     void d500_device::init(std::shared_ptr<context> ctx,
         const platform::backend_device_group& group)
     {
@@ -583,6 +589,7 @@ namespace librealsense
             _polling_error_handler = std::make_shared< polling_error_handler >(
                 1000,
                 error_control,
+                std::weak_ptr<std::atomic<bool>>( _device_alive ),
                 raw_depth_sensor->get_notifications_processor(),
                 std::make_shared< ds_notification_decoder >( d500_fw_error_report ) );
 

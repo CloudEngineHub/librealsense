@@ -13,9 +13,11 @@
 namespace librealsense
 {
     polling_error_handler::polling_error_handler(unsigned int poll_intervals_ms, std::shared_ptr<option> option,
+        std::weak_ptr<std::atomic<bool>> device_alive,
         std::shared_ptr <notifications_processor> processor, std::shared_ptr<notification_decoder> decoder)
         :_poll_intervals_ms(poll_intervals_ms),
-        _option(option),
+        _option(std::move(option)),
+        _device_alive(std::move(device_alive)),
         _notifications_processor(processor),
         _decoder(decoder)
     {
@@ -33,6 +35,7 @@ namespace librealsense
         _poll_intervals_ms = h._poll_intervals_ms;
         _active_object = h._active_object;
         _option = h._option;
+        _device_alive = h._device_alive;
         _notifications_processor = h._notifications_processor;
         _decoder = h._decoder;
     }
@@ -41,6 +44,7 @@ namespace librealsense
     {
         if( poll_intervals_ms )
             _poll_intervals_ms = poll_intervals_ms;
+        _silenced = false;
         _active_object->start();
     }
     void polling_error_handler::stop()
@@ -54,6 +58,18 @@ namespace librealsense
         {
             if( ! _silenced )
             {
+                // The owning device sets *_device_alive = false in its destructor body,
+                // before any of its members destruct. That's our signal to exit cleanly
+                // without firing another (failing) FW query.
+                if( auto alive = _device_alive.lock() )
+                {
+                    if( ! alive->load() )
+                    {
+                        LOG_DEBUG( "Device marked dead; shutting down polling loop" );
+                        _silenced = true;
+                        return;
+                    }
+                }
                 try
                 {
                     auto val = static_cast< uint8_t >( _option->query() );
