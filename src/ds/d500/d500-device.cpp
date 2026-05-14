@@ -386,8 +386,9 @@ namespace librealsense
 
     d500_device::~d500_device()
     {
-        if( _device_alive )
-            _device_alive->store( false );
+        // Signal background loops (polling_error_handler) so they exit cleanly on the
+        // next tick instead of firing one more failing FW query before being joined.
+        _device_alive->store( false );
     }
 
     void d500_device::init(std::shared_ptr<context> ctx,

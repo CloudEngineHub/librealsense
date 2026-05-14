@@ -44,7 +44,6 @@ namespace librealsense
     {
         if( poll_intervals_ms )
             _poll_intervals_ms = poll_intervals_ms;
-        _silenced = false;
         _active_object->start();
     }
     void polling_error_handler::stop()
@@ -60,15 +59,15 @@ namespace librealsense
             {
                 // The owning device sets *_device_alive = false in its destructor body,
                 // before any of its members destruct. That's our signal to exit cleanly
-                // without firing another (failing) FW query.
-                if( auto alive = _device_alive.lock() )
+                // without firing another (failing) FW query. An expired weak_ptr is
+                // treated the same as a false flag for robustness against destruction
+                // ordering changes.
+                auto alive = _device_alive.lock();
+                if( ! alive || ! alive->load() )
                 {
-                    if( ! alive->load() )
-                    {
-                        LOG_DEBUG( "Device marked dead; shutting down polling loop" );
-                        _silenced = true;
-                        return;
-                    }
+                    LOG_DEBUG( "Device marked dead; shutting down polling loop" );
+                    _silenced = true;
+                    return;
                 }
                 try
                 {
