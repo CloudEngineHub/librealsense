@@ -83,7 +83,7 @@ namespace librealsense
         }
 
         d500_device( std::shared_ptr< const d500_info > const & );
-        ~d500_device();
+        ~d500_device() override;
 
         std::shared_ptr<ds::d500_hwmon_response> _hw_monitor_response;
 
@@ -144,6 +144,10 @@ namespace librealsense
         rsutils::lazy< std::vector< uint8_t > > _coefficients_table_raw;
         rsutils::lazy< std::vector< uint8_t > > _new_calib_table_raw;
 
+        // MUST be declared before _polling_error_handler — destruction order matters:
+        // members destruct in reverse declaration order, so _polling_error_handler's
+        // worker thread joins (and dereferences this weak_ptr) while _device_alive is
+        // still alive.
         std::shared_ptr<std::atomic<bool>> _device_alive
             = std::make_shared<std::atomic<bool>>(true);
         std::shared_ptr<polling_error_handler> _polling_error_handler;

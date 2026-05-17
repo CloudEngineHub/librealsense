@@ -23,7 +23,8 @@ namespace librealsense
             std::shared_ptr<notifications_processor> processor, std::shared_ptr<notification_decoder> decoder);
         ~polling_error_handler();
 
-        polling_error_handler(const polling_error_handler& h);
+        polling_error_handler(const polling_error_handler &) = delete;
+        polling_error_handler & operator=(const polling_error_handler &) = delete;
 
         unsigned int get_polling_interval() const { return _poll_intervals_ms; }
 
