@@ -58,6 +58,13 @@ namespace librealsense
     std::vector<std::string> ros2_native_reader::get_option_topics() const { return {}; }
     std::vector<std::string> ros2_native_reader::get_notification_topics() const { return {}; }
 
+    void ros2_native_reader::reset()
+    {
+        // Synthesized frame numbers must restart on replay/seek (native bags don't carry the original frame_id).
+        _native_frame_counters.clear();
+        ros2_reader_base::reset();
+    }
+
     void ros2_native_reader::setup_frame(frame_interface* frame_ptr, const stream_identifier& sid) const
     {
         auto it = _profile_by_stream.find(sid);
@@ -351,6 +358,9 @@ namespace librealsense
             default:                                             return "Sensor";
             }
         };
+
+        if (sensor_to_streams.empty())
+            throw io_exception("Native ROS2 file: failed to build any stream profile - check CameraInfo/encoding warnings above");
 
         std::vector<sensor_snapshot> sensor_descriptions;
         for (auto& kv : sensor_to_streams)

@@ -154,6 +154,8 @@ namespace librealsense
 
     void ros2_reader_base::seek_to_time(const nanoseconds& seek_time)
     {
+        // if rosbag2 API is being upgraded to a newer version, we can use a rosbag2 native API call
+        
         // walk forward and stash the first message at/after seek_time in the cache;
         // read_next_cached() will return it as the next frame.
         if (seek_time > m_total_duration)

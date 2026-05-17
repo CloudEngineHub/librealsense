@@ -20,6 +20,7 @@ namespace librealsense
         ros2_native_reader(const std::string& file, const std::shared_ptr<context> ctx);
 
         std::shared_ptr<serialized_data> read_next_data() override;
+        void reset() override;
 
     private:
         device_snapshot read_device_description(const nanoseconds& time, bool reset = false) override;
