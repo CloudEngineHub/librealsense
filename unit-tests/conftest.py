@@ -240,8 +240,13 @@ def pytest_configure(config):
     setup_test_logging(config)
 
     # Enable LibRS debug logging if --rslog (once, globally)
+    # log_to_console writes directly to stderr from C++. Pytest's default fd-level
+    # capture swallows it, so we downgrade to sys-level capture (Python only) which
+    # lets C++ stderr through while still capturing Python stdout/stderr.
     if rs and config.getoption("--rslog", default=False):
         rs.log_to_console(rs.log_severity.debug)
+        if config.option.capture == 'fd':
+            config.option.capture = 'sys'
 
     # Test discovery defaults (replaces pytest.ini which is .gitignored)
     config.addinivalue_line("python_files", "pytest-*.py")
@@ -579,7 +584,7 @@ def test_context(request, module_device_setup):
     if not rs:
         pytest.skip("pyrealsense2 not available")
 
-    ctx = rs.context()
+    ctx = rs.context({"device-mask":0xfe}) # Intel only (no platform camera when testing locally)
 
     if module_device_setup and len(list(ctx.devices)) == 0:
         pytest.fail("No devices visible in context after device setup")

@@ -197,24 +197,15 @@ export const handlers = [
     })
   }),
 
-  // Firmware status
-  http.get(`${API_BASE}/devices/:deviceId/firmware`, ({ params }) => {
+  // Firmware status (bundled FW removed; recommended is always null)
+  http.get(`${API_BASE}/devices/:deviceId/status`, ({ params }) => {
     const device = mockDeviceList.find((d) => d.device_id === params.deviceId)
     return HttpResponse.json({
       device_id: params.deviceId,
       current: device?.firmware_version || '5.16.0.1',
-      recommended: device?.recommended_firmware_version || '5.16.0.1',
-      status: device?.firmware_status || 'up_to_date',
-      file_available: device?.firmware_file_available ?? true,
-    })
-  }),
-
-  // Firmware update
-  http.post(`${API_BASE}/devices/:deviceId/firmware/update`, () => {
-    return HttpResponse.json({
-      device_id: mockDevice.device_id,
-      progress: 0,
-      status: 'started',
+      recommended: null,
+      status: 'unknown',
+      file_available: false,
     })
   }),
 ]
