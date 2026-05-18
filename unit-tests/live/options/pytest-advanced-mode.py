@@ -17,33 +17,40 @@ def get_am_dev(dev):
     return rs.rs400_advanced_mode(dev)
 
 
-@pytest.mark.dependency(scope='module')
+_module_state = {}
+
+
 def test_advanced_mode_support(test_device_wrapped):
     """Prerequisite: camera must be in advanced mode. All CI cameras should already be enabled."""
     dev, ctx = test_device_wrapped
     am_dev = get_am_dev(dev)
     assert am_dev is not None
     assert am_dev.is_enabled()
+    _module_state['am_ok'] = True
 
 
-@pytest.mark.dependency(scope='module', depends=["test_advanced_mode_support"])
 def test_visual_preset_support(test_device_wrapped):
     """Cameras with advanced mode enabled should support visual preset."""
+    if not _module_state.get('am_ok'):
+        pytest.skip("prerequisite test_advanced_mode_support failed")
     dev, ctx = test_device_wrapped
     depth_sensor = dev.first_depth_sensor()
     assert depth_sensor.supports(rs.option.visual_preset)
+    _module_state['preset_ok'] = True
 
 
-@pytest.mark.dependency(scope='module', depends=["test_advanced_mode_support", "test_visual_preset_support"])
 def test_set_default_visual_preset(test_device_wrapped):
+    if not _module_state.get('preset_ok'):
+        pytest.skip("prerequisite test_visual_preset_support failed")
     dev, ctx = test_device_wrapped
     depth_sensor = dev.first_depth_sensor()
     depth_sensor.set_option(rs.option.visual_preset, int(rs.rs400_visual_preset.default))
     assert depth_sensor.get_option(rs.option.visual_preset) == rs.rs400_visual_preset.default
 
 
-@pytest.mark.dependency(scope='module', depends=["test_advanced_mode_support", "test_visual_preset_support"])
 def test_set_depth_control(test_device_wrapped):
+    if not _module_state.get('preset_ok'):
+        pytest.skip("prerequisite test_visual_preset_support failed")
     dev, ctx = test_device_wrapped
     am_dev = get_am_dev(dev)
     dc = am_dev.get_depth_control()
@@ -71,8 +78,9 @@ def test_set_depth_control(test_device_wrapped):
     assert new_dc.lrAgreeThreshold == 27
 
 
-@pytest.mark.dependency(scope='module', depends=["test_advanced_mode_support", "test_visual_preset_support"])
 def test_set_rsm(test_device_wrapped):
+    if not _module_state.get('preset_ok'):
+        pytest.skip("prerequisite test_visual_preset_support failed")
     dev, ctx = test_device_wrapped
     am_dev = get_am_dev(dev)
     rsm = am_dev.get_rsm()
@@ -87,8 +95,9 @@ def test_set_rsm(test_device_wrapped):
     assert new_rsm.removeThresh == 123
 
 
-@pytest.mark.dependency(scope='module', depends=["test_advanced_mode_support", "test_visual_preset_support"])
 def test_set_rau(test_device_wrapped):
+    if not _module_state.get('preset_ok'):
+        pytest.skip("prerequisite test_visual_preset_support failed")
     dev, ctx = test_device_wrapped
     am_dev = get_am_dev(dev)
     rau = am_dev.get_rau_support_vector_control()
@@ -112,8 +121,9 @@ def test_set_rau(test_device_wrapped):
     assert new_rau.vShrink == 2
 
 
-@pytest.mark.dependency(scope='module', depends=["test_advanced_mode_support", "test_visual_preset_support"])
 def test_set_color_control(test_device_wrapped):
+    if not _module_state.get('preset_ok'):
+        pytest.skip("prerequisite test_visual_preset_support failed")
     dev, ctx = test_device_wrapped
     am_dev = get_am_dev(dev)
     color_control = am_dev.get_color_control()
@@ -131,8 +141,9 @@ def test_set_color_control(test_device_wrapped):
     assert new_cc.disableSADNormalize == 1
 
 
-@pytest.mark.dependency(scope='module', depends=["test_advanced_mode_support", "test_visual_preset_support"])
 def test_set_rau_thresholds_control(test_device_wrapped):
+    if not _module_state.get('preset_ok'):
+        pytest.skip("prerequisite test_visual_preset_support failed")
     dev, ctx = test_device_wrapped
     am_dev = get_am_dev(dev)
     rau_tc = am_dev.get_rau_thresholds_control()
@@ -146,8 +157,9 @@ def test_set_rau_thresholds_control(test_device_wrapped):
     assert new_rau_tc.rauDiffThresholdBlue == 30
 
 
-@pytest.mark.dependency(scope='module', depends=["test_advanced_mode_support", "test_visual_preset_support"])
 def test_set_slo_color_thresholds_control(test_device_wrapped):
+    if not _module_state.get('preset_ok'):
+        pytest.skip("prerequisite test_visual_preset_support failed")
     dev, ctx = test_device_wrapped
     am_dev = get_am_dev(dev)
     slo_ctc = am_dev.get_slo_color_thresholds_control()
@@ -161,8 +173,9 @@ def test_set_slo_color_thresholds_control(test_device_wrapped):
     assert new_slo_ctc.diffThresholdBlue == 3
 
 
-@pytest.mark.dependency(scope='module', depends=["test_advanced_mode_support", "test_visual_preset_support"])
 def test_set_slo_penalty_control(test_device_wrapped):
+    if not _module_state.get('preset_ok'):
+        pytest.skip("prerequisite test_visual_preset_support failed")
     dev, ctx = test_device_wrapped
     am_dev = get_am_dev(dev)
     slo_pc = am_dev.get_slo_penalty_control()
@@ -182,8 +195,9 @@ def test_set_slo_penalty_control(test_device_wrapped):
     assert new_slo_pc.sloK2PenaltyMod2 == 6
 
 
-@pytest.mark.dependency(scope='module', depends=["test_advanced_mode_support", "test_visual_preset_support"])
 def test_set_hdad(test_device_wrapped):
+    if not _module_state.get('preset_ok'):
+        pytest.skip("prerequisite test_visual_preset_support failed")
     dev, ctx = test_device_wrapped
     am_dev = get_am_dev(dev)
     hdad = am_dev.get_hdad()
@@ -197,8 +211,9 @@ def test_set_hdad(test_device_wrapped):
     assert new_hdad.ignoreSAD == 1
 
 
-@pytest.mark.dependency(scope='module', depends=["test_advanced_mode_support", "test_visual_preset_support"])
 def test_set_color_correction(test_device_wrapped):
+    if not _module_state.get('preset_ok'):
+        pytest.skip("prerequisite test_visual_preset_support failed")
     dev, ctx = test_device_wrapped
     am_dev = get_am_dev(dev)
     cc = am_dev.get_color_correction()
@@ -230,8 +245,9 @@ def test_set_color_correction(test_device_wrapped):
     assert new_cc.colorCorrection12 == pytest.approx(1.3, abs=0.01)
 
 
-@pytest.mark.dependency(scope='module', depends=["test_advanced_mode_support", "test_visual_preset_support"])
 def test_set_ae_control(test_device_wrapped):
+    if not _module_state.get('preset_ok'):
+        pytest.skip("prerequisite test_visual_preset_support failed")
     dev, ctx = test_device_wrapped
     am_dev = get_am_dev(dev)
     aec = am_dev.get_ae_control()
@@ -241,8 +257,9 @@ def test_set_ae_control(test_device_wrapped):
     assert new_aec.meanIntensitySetPoint == 1234
 
 
-@pytest.mark.dependency(scope='module', depends=["test_advanced_mode_support", "test_visual_preset_support"])
 def test_set_depth_table(test_device_wrapped):
+    if not _module_state.get('preset_ok'):
+        pytest.skip("prerequisite test_visual_preset_support failed")
     dev, ctx = test_device_wrapped
     am_dev = get_am_dev(dev)
     dt = am_dev.get_depth_table()
@@ -260,8 +277,9 @@ def test_set_depth_table(test_device_wrapped):
     assert new_dt.disparityShift == 2
 
 
-@pytest.mark.dependency(scope='module', depends=["test_advanced_mode_support", "test_visual_preset_support"])
 def test_set_census(test_device_wrapped):
+    if not _module_state.get('preset_ok'):
+        pytest.skip("prerequisite test_visual_preset_support failed")
     dev, ctx = test_device_wrapped
     am_dev = get_am_dev(dev)
     census = am_dev.get_census()
@@ -273,8 +291,9 @@ def test_set_census(test_device_wrapped):
     assert new_census.vDiameter == 6
 
 
-@pytest.mark.dependency(scope='module', depends=["test_advanced_mode_support", "test_visual_preset_support"])
 def test_set_amp_factor(test_device_wrapped):
+    if not _module_state.get('preset_ok'):
+        pytest.skip("prerequisite test_visual_preset_support failed")
     dev, ctx = test_device_wrapped
     am_dev = get_am_dev(dev)
     af = am_dev.get_amp_factor()
@@ -284,8 +303,9 @@ def test_set_amp_factor(test_device_wrapped):
     assert new_af.a_factor == pytest.approx(0.12, abs=0.005)
 
 
-@pytest.mark.dependency(scope='module', depends=["test_advanced_mode_support", "test_visual_preset_support"])
 def test_return_to_default_visual_preset(test_device_wrapped):
+    if not _module_state.get('preset_ok'):
+        pytest.skip("prerequisite test_visual_preset_support failed")
     dev, ctx = test_device_wrapped
     depth_sensor = dev.first_depth_sensor()
     depth_sensor.set_option(rs.option.visual_preset, int(rs.rs400_visual_preset.default))

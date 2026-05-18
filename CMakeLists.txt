@@ -15,12 +15,6 @@ if(${FORCE_LIBUVC} OR ${FORCE_WINUSB_UVC} OR ${ANDROID_USB_HOST_UVC})
     set(FORCE_RSUSB_BACKEND ON)
 endif()
 
-# Checking Internet connection, as DEPTH CAM needs to download the FW from amazon cloud
-if(IMPORT_DEPTH_CAM_FW AND NOT INTERNET_CONNECTION)
-    message(WARNING "No internet connection, disabling IMPORT_DEPTH_CAM_FW")
-    set(IMPORT_DEPTH_CAM_FW OFF)
-endif()
-
 if (BUILD_PC_STITCHING AND NOT BUILD_GLSL_EXTENSIONS)
     MESSAGE(STATUS "BUILD_PC_STITCHING explicitely depends on BUILD_GLSL_EXTENSIONS, set it ON")
     SET(BUILD_GLSL_EXTENSIONS ON)
@@ -115,10 +109,6 @@ endif()
 if(BUILD_UNIT_TESTS)
     include( CMake/external_catch2.cmake )
     add_subdirectory(unit-tests)
-endif()
-
-if(IMPORT_DEPTH_CAM_FW)
-    add_subdirectory(common/fw)
 endif()
 
 include(CMake/embedd_udev_rules.cmake)

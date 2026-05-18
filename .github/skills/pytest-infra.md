@@ -139,43 +139,48 @@ When migrating a legacy `test-*.py` to `pytest-*.py`:
 
 ## Handling `on_fail=test.ABORT`
 
-The legacy framework supported `with test.closure('Name', on_fail=test.ABORT):` — if that closure failed, all subsequent closures were skipped. In pytest, use the **`pytest-dependency`** plugin (already in `requirements.txt` and `plugins.py`).
+The legacy framework supported `with test.closure('Name', on_fail=test.ABORT):` — if that closure failed, all subsequent closures were skipped. In pytest, use a **module-level state dict** with `pytest.skip()`.
 
-**Pattern**: mark the prerequisite test with `@pytest.mark.dependency(scope='module')`, and each dependent test with `@pytest.mark.dependency(scope='module', depends=["prerequisite_name"])`. If the prerequisite fails or is skipped, all dependents are automatically skipped.
+> **Why not `pytest-dependency`?** The plugin requires exact test-name matching, but `pytest_generate_tests` (used by `device_each`) appends parametrized suffixes like `[D455-1234567890]`. The plugin cannot match `"test_foo"` against `"test_foo[D455-1234567890]"` — no regex, glob, or prefix support exists. The module-state pattern is zero-dependency and works regardless of parametrization.
+
+**Pattern**: the prerequisite test sets a flag in a module-level dict on success. Dependent tests check the flag and `pytest.skip()` if missing.
 
 ```python
-# Prerequisite test — asserts (hard fail if condition not met), registers as a dependency
-@pytest.mark.dependency(scope='module')
+_module_state = {}
+
 def test_advanced_mode_support(test_device_wrapped):
     """Prerequisite: camera must be in advanced mode."""
     dev, ctx = test_device_wrapped
     assert rs.rs400_advanced_mode(dev).is_enabled()
+    _module_state['am_ok'] = True
 
-# Dependent test — skipped automatically if test_advanced_mode_support failed/was skipped
-@pytest.mark.dependency(scope='module', depends=["test_advanced_mode_support"])
 def test_set_depth_control(test_device_wrapped):
+    if not _module_state.get('am_ok'):
+        pytest.skip("prerequisite test_advanced_mode_support failed")
     dev, ctx = test_device_wrapped
     ...
 ```
 
-**`scope='module'`**: limits dependency resolution to the current test file, so identically-named tests in other files do not interfere.
-
-**Parametrized tests**: when both the prerequisite and dependent tests share the same parametrization (e.g., `device_each`), `pytest-dependency` automatically matches per-parameter — `test_set_depth_control[D455-SN]` is only skipped if `test_advanced_mode_support[D455-SN]` specifically failed, not if a different device's run failed.
-
-**Chain of ABORTs**: if a file has multiple `on_fail=test.ABORT` closures in sequence, list all prerequisite names in `depends=`:
+**Chain of ABORTs**: if a file has multiple prerequisite tests in sequence, each sets its own flag. Dependents check the deepest prerequisite (which implicitly requires all prior ones to have passed):
 
 ```python
-@pytest.mark.dependency(scope='module')
+_module_state = {}
+
 def test_advanced_mode_support(...):   # first ABORT
     assert ...
+    _module_state['am_ok'] = True
 
-@pytest.mark.dependency(scope='module', depends=["test_advanced_mode_support"])
 def test_visual_preset_support(...):   # second ABORT
+    if not _module_state.get('am_ok'):
+        pytest.skip("prerequisite test_advanced_mode_support failed")
     assert ...
+    _module_state['preset_ok'] = True
 
-# Everything after the second ABORT depends on both
-@pytest.mark.dependency(scope='module', depends=["test_advanced_mode_support", "test_visual_preset_support"])
+# Everything after the second ABORT checks only 'preset_ok'
+# (preset_ok being set implies am_ok was set too)
 def test_set_depth_control(...):
+    if not _module_state.get('preset_ok'):
+        pytest.skip("prerequisite test_visual_preset_support failed")
     ...
 ```
 

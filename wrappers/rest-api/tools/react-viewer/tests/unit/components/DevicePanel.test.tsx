@@ -25,7 +25,6 @@ describe('DevicePanel', () => {
       startSensorStreaming: vi.fn().mockResolvedValue(undefined),
       stopSensorStreaming: vi.fn().mockResolvedValue(undefined),
       checkFirmwareUpdates: vi.fn().mockResolvedValue(undefined),
-      updateFirmware: vi.fn().mockResolvedValue(undefined),
     })
   })
 

@@ -179,6 +179,13 @@ def pytest_addoption(parser):
              "--tag <name> (run only tests with marker, maps to -m), "
              "--retries N (retry failed tests N times)."
     )
+    group.addoption(
+        "--test-dir",
+        action="store",
+        default=None,
+        help="Restrict pytest discovery to tests under this directory "
+             "(matches run-unit-tests.py --test-dir for shared UNIT_TESTS_ARGS)."
+    )
 
 
 # Shared context tags (e.g. "nightly", "weekly") — tests check this to adjust behavior
@@ -233,8 +240,13 @@ def pytest_configure(config):
     setup_test_logging(config)
 
     # Enable LibRS debug logging if --rslog (once, globally)
+    # log_to_console writes directly to stderr from C++. Pytest's default fd-level
+    # capture swallows it, so we downgrade to sys-level capture (Python only) which
+    # lets C++ stderr through while still capturing Python stdout/stderr.
     if rs and config.getoption("--rslog", default=False):
         rs.log_to_console(rs.log_severity.debug)
+        if config.option.capture == 'fd':
+            config.option.capture = 'sys'
 
     # Test discovery defaults (replaces pytest.ini which is .gitignored)
     config.addinivalue_line("python_files", "pytest-*.py")
@@ -336,6 +348,10 @@ def pytest_generate_tests(metafunc):
 
 def pytest_collection_modifyitems(config, items):
     """Auto-skip nightly/dds tests, filter --live, sort by priority."""
+    test_dir = config.getoption("--test-dir", default=None)
+    if test_dir:
+        abs_test_dir = os.path.abspath(test_dir)
+        items[:] = [item for item in items if str(item.path).startswith(abs_test_dir)]
     filter_and_sort_items(config, items)
 
 
@@ -568,7 +584,7 @@ def test_context(request, module_device_setup):
     if not rs:
         pytest.skip("pyrealsense2 not available")
 
-    ctx = rs.context()
+    ctx = rs.context({"device-mask":0xfe}) # Intel only (no platform camera when testing locally)
 
     if module_device_setup and len(list(ctx.devices)) == 0:
         pytest.fail("No devices visible in context after device setup")

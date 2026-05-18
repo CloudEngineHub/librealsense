@@ -29,7 +29,6 @@
 
 #include <src/hdr-config.h>
 #include <src/ds/ds-thermal-monitor.h>
-#include <common/fw/firmware-version.h>
 #include <src/fw-update/fw-update-unsigned.h>
 
 #include <rsutils/lazy.h>
@@ -635,7 +634,6 @@ namespace librealsense
 
             _fw_version = firmware_version(fwv);
 
-            _recommended_fw_version = firmware_version(D4XX_RECOMMENDED_FIRMWARE_VERSION);
             if (_fw_version >= firmware_version("5.10.4.0"))
                 _device_capabilities = parse_device_capabilities( gvd_buff );
 
@@ -998,7 +996,6 @@ namespace librealsense
         register_info(RS2_CAMERA_INFO_ADVANCED_MODE, ((advanced_mode) ? "YES" : "NO"));
         register_info(RS2_CAMERA_INFO_PRODUCT_ID, pid_hex_str);
         register_info(RS2_CAMERA_INFO_PRODUCT_LINE, "D400");
-        register_info(RS2_CAMERA_INFO_RECOMMENDED_FIRMWARE_VERSION, _recommended_fw_version);
         register_info(RS2_CAMERA_INFO_CAMERA_LOCKED, _is_locked ? "YES" : "NO");
         if (_is_mipi_device)
             register_info(RS2_CAMERA_INFO_DFU_DEVICE_PATH, group.uvc_devices.front().dfu_device_path);

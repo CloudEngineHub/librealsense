@@ -33,8 +33,8 @@ def compute_homography(pts):
 
 def detect_a4_page(img, required_ids):
     """
-    Detect ArUco markers and return center of each one
-    Returns None if not all required markers are found
+    Detect ArUco markers and return centers. Returns 4 points if all are found,
+    3 points if exactly one is missing (caller uses affine), or None otherwise.
     """
     # init aruco detector
     aruco = cv2.aruco
@@ -50,11 +50,29 @@ def detect_a4_page(img, required_ids):
         parameters = aruco.DetectorParameters_create()
         corners, ids, _ = aruco.detectMarkers(img, dictionary, parameters=parameters)
 
-    if ids is None or not all(rid in ids for rid in required_ids):
+    if ids is None or len([rid for rid in required_ids if rid in ids]) <= 2:
         return None
 
     id_to_corner = dict(zip(ids.flatten(), corners))  # map id to corners
-    values = [id_to_corner[rid][0].mean(axis=0) for rid in required_ids] # for each required id, get center of marker coords
+    values = [id_to_corner[rid][0].mean(axis=0) for rid in required_ids if rid in id_to_corner] # for each required id, get center of marker coords
+
+    if len(values) == 3:
+        # Reconstruct missing 4th corner. The page is rectangular, so opposite
+        # corners share a midpoint; the diagonal is the longest pairwise distance.
+        # Missing 4th = (diag1 + diag2) - third.
+        a, b, c = values
+        d_ab = np.linalg.norm(a - b)
+        d_bc = np.linalg.norm(b - c)
+        d_ac = np.linalg.norm(a - c)
+        if d_ab >= d_bc and d_ab >= d_ac:
+            diag1, diag2, third = a, b, c
+        elif d_bc >= d_ac:
+            diag1, diag2, third = b, c, a
+        else:
+            diag1, diag2, third = a, c, b
+        values.append(diag1 + diag2 - third)
+        missing = next(rid for rid in required_ids if rid not in id_to_corner)
+        log.i(f"detect_a4_page: 3/4 markers found, reconstructed id {missing}")
 
     return np.array(values, dtype=np.float32)
 
@@ -193,15 +211,53 @@ def make_depth_filter_chain():
     return apply
 
 
-def is_color_close(actual, expected, tolerance):
-    return all(abs(int(a) - int(e)) <= tolerance for a, e in zip(actual, expected))
+# HSV tolerances for is_color_close. Per-channel RGB tolerance is sensitive to
+# overall scene brightness — when lab lighting changes, every bright color shifts
+# together and trips the per-channel check. HSV separates the concerns: hue catches
+# real color errors, value absorbs illumination shifts.
+#
+# Each axis means a different thing, so each gets a different slack:
+#   hue: position on the color wheel — the "color name" (yellow vs orange vs red).
+#        H wraps at 180 in OpenCV. Tight (~5% of the wheel) because hue *is* the
+#        identity of a chromatic color; loose tolerance here would let yellow
+#        pass for orange.
+#   sat: how vivid vs how grayish the color is. Cameras desaturate dim scenes,
+#        so loose — but not so loose that a pure color passes for a muted one.
+#   val: brightness. Loose because brightness is what shifts most across rigs and
+#        times of day; this is the axis that absorbs illumination changes.
+#   rgb: per-channel fallback for achromatic samples only (gray/black/white) where
+#        hue is undefined and HSV S is dominated by sensor noise.
+TOLERANCE = {'hue': 10, 'sat': 70, 'val': 70, 'rgb': 70}
+ACHROMATIC_S = 40       # expected S below this → treat as gray/white/black
 
 
-_snapshot_saved = False
+def is_color_close(actual, expected):
+    """Compare two RGB triples: HSV for chromatic colors, per-channel RGB for achromatic."""
+    expected_h, expected_s, expected_v = (int(c) for c in
+        cv2.cvtColor(np.uint8([[[expected[2], expected[1], expected[0]]]]), cv2.COLOR_BGR2HSV)[0, 0])
+
+    # Gray/black/white have no real hue, so compare RGB directly instead of HSV.
+    if expected_s < ACHROMATIC_S:
+        r_diff = abs(actual[0] - expected[0])
+        g_diff = abs(actual[1] - expected[1])
+        b_diff = abs(actual[2] - expected[2])
+        return max(r_diff, g_diff, b_diff) <= TOLERANCE['rgb']
+
+    actual_h, actual_s, actual_v = (int(c) for c in
+        cv2.cvtColor(np.uint8([[[actual[2], actual[1], actual[0]]]]), cv2.COLOR_BGR2HSV)[0, 0])
+    hue_diff = abs(actual_h - expected_h)
+    hue_diff = min(hue_diff, 180 - hue_diff)  # H wraps at 180
+    return (hue_diff <= TOLERANCE['hue']
+            and abs(actual_s - expected_s) <= TOLERANCE['sat']
+            and abs(actual_v - expected_v) <= TOLERANCE['val'])
+
+
+_snapshot_saved = set()
 
 def save_failure_snapshot( test_file, pipeline, annotated_image=None ):
     """
-    Save a single failure snapshot per test run (first call wins).
+    Save one failure snapshot per test file (first call per test wins). When
+    multiple IQ tests fail in the same run, each gets its own snapshot.
     If *annotated_image* is provided it is saved directly; otherwise a raw
     frame is grabbed from the still-running *pipeline* as a fallback
     (useful for page-detection failures).
@@ -210,8 +266,8 @@ def save_failure_snapshot( test_file, pipeline, annotated_image=None ):
     :param pipeline:         an active ``rs.pipeline`` (for the raw-frame fallback)
     :param annotated_image:  optional pre-built debug image (numpy array)
     """
-    global _snapshot_saved
-    if _snapshot_saved:
+    name = os.path.basename( test_file ).replace( '.py', '' )
+    if name in _snapshot_saved:
         return
 
     image = annotated_image
@@ -224,7 +280,6 @@ def save_failure_snapshot( test_file, pipeline, annotated_image=None ):
     if image is None:
         return
 
-    name = os.path.basename( test_file ).replace( '.py', '' )
     try:
         dev_name = pipeline.get_active_profile().get_device().get_info( rs.camera_info.name ).split()[-1]
         filename = f"{name}_{dev_name}.png"
@@ -235,4 +290,4 @@ def save_failure_snapshot( test_file, pipeline, annotated_image=None ):
         filename = os.path.join( logdir, filename )
     cv2.imwrite( filename, image )
     log.i( f"Saved failure snapshot: {filename}" )
-    _snapshot_saved = True
+    _snapshot_saved.add( name )

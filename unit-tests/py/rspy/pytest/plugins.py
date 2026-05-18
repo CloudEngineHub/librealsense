@@ -22,7 +22,7 @@ REQUIRED_PYTEST_PLUGINS = {
     'pytest_retry':        'pytest-retry',
     'pytest_repeat':       'pytest-repeat',
     'pytest_check':        'pytest-check',
-    'pytest_dependency':   'pytest-dependency',
+
 }
 
 
