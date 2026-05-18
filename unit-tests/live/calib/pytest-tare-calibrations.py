@@ -9,7 +9,6 @@ from calibrations_common import calibration_main, get_calibration_device, is_mip
 
 log = logging.getLogger(__name__)
 
-# Disabled until we stabilize the lab (was #test:donotrun in the legacy directive form).
 pytestmark = [
     pytest.mark.context("nightly"),
     pytest.mark.device("D400*"),

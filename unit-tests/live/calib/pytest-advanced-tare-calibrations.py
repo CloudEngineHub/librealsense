@@ -20,7 +20,6 @@ from calibrations_common import (
 
 log = logging.getLogger(__name__)
 
-# Disabled until we stabilize the lab (was #test:donotrun in the legacy directive form).
 pytestmark = [
     pytest.mark.context("nightly"),
     pytest.mark.context("calibration"),
