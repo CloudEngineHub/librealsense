@@ -1,3 +1,6 @@
+## License: Apache 2.0. See LICENSE file in root directory.
+## Copyright(c) 2026 RealSense, Inc. All Rights Reserved.
+
 """
 Build a pyrealsense2 wheel locally from a CMake build directory.
 
@@ -83,14 +86,14 @@ def clean_staged():
 
 
 def stage(src):
+    # Resolve symlinks so the wheel ends up with real files. Wheels are zips
+    # and don't preserve symlinks reliably; a versioned `librealsense2.so.2`
+    # symlink would otherwise land in the wheel as a broken pointer back into
+    # the build tree.
     dest = PACKAGE_DIR / src.name
-    if src.is_symlink():
-        target = os.readlink(src)
-        if dest.exists() or dest.is_symlink():
-            dest.unlink()
-        os.symlink(target, dest)
-    else:
-        shutil.copy2(src, dest)
+    if dest.exists() or dest.is_symlink():
+        dest.unlink()
+    shutil.copy2(src.resolve(), dest, follow_symlinks=True)
     print("  staged: {}".format(src.name))
 
 
