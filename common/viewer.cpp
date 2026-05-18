@@ -3059,16 +3059,6 @@ namespace rs2
 
                 if (tab == 3)
                 {
-                    bool recommend_fw_updates = temp_cfg.get(configurations::update::recommend_updates);
-                    if (ImGui::Checkbox("Recommend Bundled Firmware", &recommend_fw_updates))
-                    {
-                        temp_cfg.set(configurations::update::recommend_updates, recommend_fw_updates);
-                        refresh_updates = true;
-                    }
-                    if (ImGui::IsItemHovered())
-                    {
-                        RsImGui::CustomTooltip("%s", "When firmware of the device is below the version bundled with this software release\nsuggest firmware update");
-                    }
 #ifdef CHECK_FOR_UPDATES
                     ImGui::Separator();
 

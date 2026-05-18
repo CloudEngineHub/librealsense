@@ -196,6 +196,8 @@ python3 run-unit-tests.py --test-dir /path/to/custom/tests
 
 ## Custom Firmware for Testing
 
+The SDK no longer ships a bundled firmware blob, so `test-fw-update` **requires** a custom firmware path for the device under test. Without one it logs a warning and skips. Download a signed `.bin` from <https://dev.realsenseai.com/docs/firmware-updates>, then:
+
 ```bash
 python3 run-unit-tests.py --custom-fw-d400 /path/to/firmware.bin
 python3 run-unit-tests.py --custom-fw-d555 /path/to/firmware.bin

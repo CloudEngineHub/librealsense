@@ -18,15 +18,6 @@
 #include <thread>
 #include <condition_variable>
 
-#ifdef INTERNAL_FW
-#include "common/fw/D4XX_FW_Image.h"
-#else
-#define FW_D4XX_FW_IMAGE_VERSION ""
-const char* fw_get_D4XX_FW_Image(int) { return NULL; }
-
-
-#endif // INTERNAL_FW
-
 constexpr const char* recommended_fw_url = "https://dev.realsenseai.com/docs/firmware-updates";
 
 namespace rs2
@@ -39,47 +30,7 @@ namespace rs2
         RS2_FWU_STATE_FAILED = 3,
     };
 
-    bool is_recommended_fw_available(const std::string& product_line, const std::string& pid)
-    {
-        auto pl = parse_product_line(product_line);
-        auto fv = get_available_firmware_version(pl, pid);
-        return !(fv == "");
-    }
-
-    int parse_product_line(const std::string& product_line)
-    {
-        if (product_line == "D400") return RS2_PRODUCT_LINE_D400;
-        else return -1;
-    }
-
-    std::string get_available_firmware_version(int product_line, const std::string& pid)
-    {
-        if (product_line == RS2_PRODUCT_LINE_D400) return FW_D4XX_FW_IMAGE_VERSION;
-        else return "";
-    }
-
-    std::vector< uint8_t > get_default_fw_image( int product_line, const std::string & pid )
-    {
-        std::vector< uint8_t > image;
-
-        switch( product_line )
-        {
-        case RS2_PRODUCT_LINE_D400: 
-        {
-            bool allow_rc_firmware = config_file::instance().get_or_default( configurations::update::allow_rc_firmware, false );
-            if( strlen( FW_D4XX_FW_IMAGE_VERSION ) && ! allow_rc_firmware )
-            {
-                int size = 0;
-                auto hex = fw_get_D4XX_FW_Image( size );
-                image = std::vector< uint8_t >( hex, hex + size );
-            }
-        }
-        break;
-        default:
-            break;
-        }
-        return image;
-    }
+    const char * fw_download_url() { return recommended_fw_url; }
 
     bool is_upgradeable(const std::string& curr, const std::string& available)
     {
