@@ -29,8 +29,7 @@ public:
     ~min_z_depth_improver();
 
     // Apply MinZ improvement to the frameset in `f`.
-    // IR frames are taken from `f` (upstream filters leave them unmodified);
-    // the depth in `f` is the already-filtered depth from upstream.
+    // Runs before decimation so depth and IR are at matching full resolution.
     // Returns `f` unchanged when MinZ is unavailable or inputs are missing.
     rs2::frame apply( rs2::frame f, rs2::frame_source const & src );
 
