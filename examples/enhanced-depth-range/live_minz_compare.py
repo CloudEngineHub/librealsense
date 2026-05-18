@@ -41,6 +41,15 @@ ir1 = profile.get_stream(rs.stream.infrared, 1).as_video_stream_profile()
 ir2 = profile.get_stream(rs.stream.infrared, 2).as_video_stream_profile()
 calib = Calibration.from_sdk(ir1.get_intrinsics(), ir1.get_extrinsics_to(ir2))
 
+# Meters per Z16 unit (RS2_OPTION_DEPTH_UNITS). Typical D4xx is 0.001 (raw
+# Z16 == mm), but high-accuracy presets and SR300 use other values, so we
+# must scale raw values by this factor to get true millimetres.
+try:
+    depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
+except Exception:
+    depth_scale = 0.001
+print(f"Depth scale: {depth_scale} m/unit ({depth_scale * 1000:.4f} mm/unit)")
+
 # ── 3. Construct the improver ───────────────────────────────────────────
 improver = DepthRangeImprover(calib)
 print(f"MinZ threshold: {improver.min_z_threshold_mm} mm")
@@ -81,7 +90,8 @@ try:
         f = pipeline.wait_for_frames()
         ir_left  = np.asanyarray(f.get_infrared_frame(1).get_data())
         ir_right = np.asanyarray(f.get_infrared_frame(2).get_data())
-        depth_hw = np.asanyarray(f.get_depth_frame().get_data())
+        depth_hw = (np.asanyarray(f.get_depth_frame().get_data())
+                    * depth_scale * 1000.0).astype(np.uint16)
 
         depth_imp = improver.process(ir_left, ir_right, depth_hw)
 

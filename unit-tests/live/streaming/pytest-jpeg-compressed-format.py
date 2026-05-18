@@ -13,9 +13,9 @@ pytestmark = [
 ]
 
 _jpeg_profile = None  # set by test_jpeg_format_support, reused by test_jpeg_streaming_conversion
+_module_state = {}
 
 
-@pytest.mark.dependency(scope='module')
 def test_jpeg_format_support(module_device_setup):
     """Prerequisite: device must support JPEG streaming."""
     global _jpeg_profile
@@ -29,10 +29,12 @@ def test_jpeg_format_support(module_device_setup):
     if _jpeg_profile is None:
         pytest.fail("Device does not support JPEG streaming")
     log.debug(f"Device supports JPEG streaming with profile: {_jpeg_profile}")
+    _module_state['jpeg_ok'] = True
 
 
-@pytest.mark.dependency(scope='module', depends=["test_jpeg_format_support"])
 def test_jpeg_streaming_conversion(module_device_setup):
+    if not _module_state.get('jpeg_ok'):
+        pytest.skip("prerequisite test_jpeg_format_support failed")
     """Stream JPEG color and verify conversion to RGB8 succeeds for 10 frames."""
     pipeline = rs.pipeline()
     config = rs.config()

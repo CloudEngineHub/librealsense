@@ -16,16 +16,20 @@ pytestmark = [
 ]
 
 
-@pytest.mark.dependency(scope='module')
+_module_state = {}
+
+
 def test_visual_preset_support(test_device_wrapped):
     """Prerequisite: no use continuing if there is no preset support."""
     dev, ctx = test_device_wrapped
     depth_sensor = dev.first_depth_sensor()
     assert depth_sensor.supports(rs.option.visual_preset)
+    _module_state['preset_ok'] = True
 
 
-@pytest.mark.dependency(scope='module', depends=["test_visual_preset_support"])
 def test_set_presets(test_device_wrapped):
+    if not _module_state.get('preset_ok'):
+        pytest.skip("prerequisite test_visual_preset_support failed")
     dev, ctx = test_device_wrapped
     depth_sensor = dev.first_depth_sensor()
     depth_sensor.set_option(rs.option.visual_preset, int(rs.rs400_visual_preset.high_accuracy))
@@ -34,8 +38,9 @@ def test_set_presets(test_device_wrapped):
     assert depth_sensor.get_option(rs.option.visual_preset) == rs.rs400_visual_preset.default
 
 
-@pytest.mark.dependency(scope='module', depends=["test_visual_preset_support"])
 def test_save_load_preset(test_device_wrapped):
+    if not _module_state.get('preset_ok'):
+        pytest.skip("prerequisite test_visual_preset_support failed")
     dev, ctx = test_device_wrapped
     depth_sensor = dev.first_depth_sensor()
     am_dev = rs.rs400_advanced_mode(dev)
@@ -50,8 +55,9 @@ def test_save_load_preset(test_device_wrapped):
     assert am_dev.get_depth_control().textureCountThreshold != 250
 
 
-@pytest.mark.dependency(scope='module', depends=["test_visual_preset_support"])
 def test_setting_color_options(test_device_wrapped):
+    if not _module_state.get('preset_ok'):
+        pytest.skip("prerequisite test_visual_preset_support failed")
     """Setting visual preset should update color sensor options on D400 but not D500.
 
     Uses Hue (not Gain/Exposure) to avoid auto-exposure interference.

@@ -3022,7 +3022,7 @@ namespace rs2
                     std::string excl_icon_str = rsutils::string::from() << textual_icons::exclamation_triangle
                                                 << " The following changes will take effect only after restarting the application";
                     ImGui::Text( "%s", excl_icon_str.c_str() );
-                    bool allow_partial_device = temp_cfg.get_nested< bool >( "context.partial-device-allowed", false );
+                    bool allow_partial_device = temp_cfg.get_nested< bool >( "context.partial-device-allowed", true );
                     if( ImGui::Checkbox( "Allow partial device initialization", &allow_partial_device ) )
                     {
                         temp_cfg.set_nested( "context.partial-device-allowed", allow_partial_device );
