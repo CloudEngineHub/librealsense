@@ -14,6 +14,10 @@ Examples (run from wrappers/python/):
     # Linux/macOS single-config build
     python build_wheel.py --build-dir ../../build
 
+    # Windows build with DDS — bundle fastdds, fastcdr, foonathan_memory
+    python build_wheel.py --build-dir ../../build/Release \
+        --extra-lib "fastdds*.dll" --extra-lib "fastcdr*.dll" --extra-lib "foonathan_memory*.dll"
+
 The script:
   1. Generates pyrealsense2/_version.py (via find_librs_version.py)
   2. Copies the compiled extension (.pyd/.so) and the librealsense2 shared
