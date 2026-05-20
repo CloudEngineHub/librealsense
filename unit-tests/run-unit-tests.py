@@ -803,8 +803,11 @@ try:
                         if ok:
                             continue
                         fallback = _fw_fallback_image_for( d )
-                        if fallback and not custom_fw_path:
-                            log.i( f'{test.name}: {d.name}_{sn} below min FW; using fallback {fallback}' )
+                        if fallback:
+                            if custom_fw_path:
+                                log.i( f'{test.name}: {d.name}_{sn} below min FW; --custom-fw-d400 is below min too, overriding with fallback {fallback}' )
+                            else:
+                                log.i( f'{test.name}: {d.name}_{sn} below min FW; using fallback {fallback}' )
                             fw_d400_override = fallback
                         else:
                             log.w( f'{test.name}: {d.name}_{sn} below min FW with no fallback; test will fail' )
