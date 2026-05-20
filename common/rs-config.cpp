@@ -8,10 +8,42 @@
 #include <rsutils/json.h>
 #include <rsutils/json-config.h>
 #include <fstream>
+#include <cstdio>
+#include <string>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 using json = rsutils::json;
 
 using namespace rs2;
+
+static bool atomic_replace_file(const char* source, const char* target)
+{
+#ifdef _WIN32
+    return MoveFileExA(source, target, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+    return std::rename(source, target) == 0;
+#endif
+}
+
+static std::string make_temp_filename(const char* filename)
+{
+    std::string temp(filename);
+    temp += ".";
+
+    // Append the process ID to the temp filename to avoid conflicts when multiple instances of the application are running
+#ifdef _WIN32
+    temp += std::to_string(GetCurrentProcessId());
+#else
+    temp += std::to_string(getpid());
+#endif
+    temp += ".tmp";
+    return temp;
+}
 
 void config_file::set(const char* key, const char* value)
 {
@@ -69,9 +101,22 @@ void config_file::save(const char* filename)
 {
     try
     {
-        std::ofstream out(filename);
+        const auto temp_filename = make_temp_filename(filename);
+
+        std::ofstream out(temp_filename.c_str());
         out << std::setw( 2 ) << _j;
         out.close();
+
+        if (!out.good())
+        {
+            std::remove(temp_filename.c_str());
+            return;
+        }
+
+        if (!atomic_replace_file(temp_filename.c_str(), filename))
+        {
+            std::remove(temp_filename.c_str());
+        }
     }
     catch (...)
     {
