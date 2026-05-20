@@ -50,7 +50,11 @@ class TestDevicePortManagement:
         """@device('D999') with no match should fail and never call enable_only."""
         rc, out, tracking = run_e2e("pytest-device-setup.py", "-k", "test_d999_no_match")
         assert_outcomes(out, error=1)
-        assert "No devices" in out
+        # Pytest's short summary line gets truncated by terminal width once the
+        # MISSING-D999 parametrize ID is included in the test name, so look for
+        # the parametrize ID itself — it only appears when the missing-device
+        # sentinel path fired.
+        assert "MISSING-D999" in out
         assert len(tracking["enable_only_calls"]) == 0
 
     def test_device_each_no_match_skips_without_enabling(self):
@@ -71,7 +75,9 @@ class TestDevicePortManagement:
         assert_outcomes(out, skipped=1)
         assert len(tracking["enable_only_calls"]) == 0
 
-    def test_device_each_no_match_runs_unparametrized(self):
-        """@device_each('D999') with no match: test still collected but not parametrized."""
+    def test_device_each_no_match_still_collected(self):
+        """@device_each('D999') with no match: test is parametrized with a SKIP
+        sentinel.  When the test body doesn't consume module_device_setup, the
+        sentinel is never inspected and the test simply passes."""
         rc, out, *_ = run_e2e("pytest-each.py", "-k", "test_d999_no_match")
         assert_outcomes(out, passed=1)

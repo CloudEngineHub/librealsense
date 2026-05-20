@@ -141,7 +141,9 @@ def resolve_device_each_serials(metafunc):
     """Expand @device_each and @device markers into parametrized test instances.
 
     Called from the pytest_generate_tests hook. Resolves exclude/include patterns from
-    both markers and CLI options, then calls metafunc.parametrize() with matching serials.
+    both markers and CLI options, then calls metafunc.parametrize() with matching serials
+    at *module* scope, so module-scoped fixtures (``module_device_setup``, ``test_context``,
+    ``test_device``) are reused across all test functions sharing the same device.
 
     - ``device_each(pattern)``: one instance per matching device (optional — no instance
       if no device matches).
@@ -149,8 +151,9 @@ def resolve_device_each_serials(metafunc):
       device.  If no device matches, a ``__MISSING__:pattern`` sentinel is added so that
       the test still runs and ``module_device_setup`` can call pytest.fail() for it.
 
-    When only ``device`` markers are present (no ``device_each``), this hook returns early
-    and lets the existing non-parametrized path in ``module_device_setup`` handle them.
+    Multi-spec ``device("A", "B")`` markers are *not* parametrized here — they stay
+    un-parametrized and are resolved inside ``module_device_setup`` from module-level
+    markers via ``find_matching_devices_multi``.
     """
     device_each_markers = [m for m in metafunc.definition.iter_markers("device_each")]
     # Single-spec device() markers only — multi-spec (e.g. device("A", "B")) are handled
@@ -160,9 +163,9 @@ def resolve_device_each_serials(metafunc):
         if m.args and len(m.args) == 1
     ]
 
-    # Nothing to do if there are no device_each markers.
-    # (Pure device() markers are handled by the non-parametrized path in module_device_setup.)
-    if not device_each_markers:
+    # Nothing to do if the test has no single-spec device or device_each markers.
+    # (Multi-spec device() markers and marker-less tests are handled by module_device_setup.)
+    if not device_each_markers and not single_device_markers:
         return
 
     all_serials = []
@@ -210,6 +213,16 @@ def resolve_device_each_serials(metafunc):
             if sentinel not in all_serials:
                 all_serials.append(sentinel)
 
+    # device_each with no matches (either no candidates or all filtered): emit a SKIP
+    # sentinel so the test parametrizes and module_device_setup can call pytest.skip().
+    # Function-level markers are not visible to module-scoped fixtures via request.node
+    # (which is the Module), so the fixture cannot detect a no-match device_each on its
+    # own. The sentinel ensures consistent skip behavior whether the marker is at
+    # module level or function level.
+    if device_each_markers and not single_device_markers and not all_serials:
+        patterns = ','.join(m.args[0] for m in device_each_markers if m.args)
+        all_serials.append(f"{_SKIP_SENTINEL_PREFIX}{patterns}")
+
     if all_serials:
         def _serial_id(sn):
             if sn.startswith(_MISSING_SENTINEL_PREFIX):
@@ -221,7 +234,9 @@ def resolve_device_each_serials(metafunc):
 
         ids = [_serial_id(sn) for sn in all_serials]
         metafunc.fixturenames.append('_test_device_serial')
-        metafunc.parametrize("_test_device_serial", all_serials, ids=ids, scope="function")
+        # scope="module" groups tests in the same module that share a device serial,
+        # so module_device_setup / test_context / test_device set up once per device.
+        metafunc.parametrize("_test_device_serial", all_serials, ids=ids, scope="module")
 
 
 def find_matching_devices_multi(device_markers, cli_includes=None, cli_excludes=None):
