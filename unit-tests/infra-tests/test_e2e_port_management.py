@@ -77,7 +77,8 @@ class TestDevicePortManagement:
 
     def test_device_each_no_match_still_collected(self):
         """@device_each('D999') with no match: test is parametrized with a SKIP
-        sentinel.  When the test body doesn't consume module_device_setup, the
-        sentinel is never inspected and the test simply passes."""
+        sentinel and skipped — even if the test body doesn't consume any device
+        fixture directly. The autouse _eager_module_device_setup fixture forces
+        module_device_setup to instantiate, which inspects the sentinel and skips."""
         rc, out, *_ = run_e2e("pytest-each.py", "-k", "test_d999_no_match")
-        assert_outcomes(out, passed=1)
+        assert_outcomes(out, skipped=1)

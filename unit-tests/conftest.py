@@ -60,7 +60,7 @@ from rspy.pytest.logging_setup import (
 )
 from rspy.pytest.log_live_format import install as install_live_log_format
 from rspy.pytest.cli import consume_legacy_flags, apply_pending_flags
-from rspy.pytest.device_helpers import find_matching_devices, find_matching_devices_multi, resolve_device_each_serials, _MISSING_SENTINEL_PREFIX, _SKIP_SENTINEL_PREFIX
+from rspy.pytest.device_helpers import resolve_device_each_serials, _MISSING_SENTINEL_PREFIX, _SKIP_SENTINEL_PREFIX
 from rspy.pytest.collection import filter_and_sort_items
 from rspy.pytest.plugins import check_required_plugins
 
@@ -488,78 +488,54 @@ def __pytest_repeat_step_number(request):
     return getattr(request, 'param', 0)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="module", autouse=True)
 def module_device_setup(request, _test_device_serial, __pytest_repeat_step_number):
-    """Enable the target device via the hub. Runs once per (module, device) — fixture
-    teardown power-cycles the device only when pytest moves to the next parametrized
-    device or the next module.
+    """Enable the target device(s) via the hub. Runs once per (module, parametrized value).
+
+    All resolution (markers, CLI filters, sentinels for missing/skipped devices) happens
+    in ``resolve_device_each_serials`` at collection time.  The fixture just consumes
+    ``_test_device_serial`` and dispatches:
+
+    - ``None``            → test has no device markers; yield None.
+    - ``list[str]``       → multi-device marker; enable all serials and yield the list.
+    - sentinel strings    → ``pytest.skip`` / ``pytest.fail``.
+    - plain serial string → enable that device and yield it.
+
+    ``autouse=True`` so the hub recycle fires at the first parametrized test in each
+    device group, not lazily at whichever test happens to be the first device-consumer.
+    Without it, a synthetic-only test that runs before a live-device test in the same
+    parametrize group would defer the recycle — making the recycle landing point
+    depend on test declaration order. For tests without any device marker
+    (``_test_device_serial is None``) the body yields None immediately, costing nothing.
     """
     serial_number = _test_device_serial
 
-    if serial_number is not None:
-        # Parametrized path (single-spec device / device_each)
-        if serial_number.startswith(_SKIP_SENTINEL_PREFIX):
-            # Device matched the pattern but was excluded (wrong type, device_exclude, etc.)
-            pattern = serial_number[len(_SKIP_SENTINEL_PREFIX):]
-            pytest.skip(f"No suitable devices for requirements: {pattern}")
-        if serial_number.startswith(_MISSING_SENTINEL_PREFIX):
-            # No devices of this type found in the lab at all.
-            pattern = serial_number[len(_MISSING_SENTINEL_PREFIX):]
-            pytest.fail(f"No devices found matching requirements: {pattern}")
-        log.debug(f"Test using parametrized device: {serial_number}")
-    else:
-        # No parametrize — either a multi-device marker (resolve from module markers)
-        # or no device markers at all (yield None).
-        # request.node is the Module at module scope; module-level pytestmark is visible.
-        device_markers = []
-        for marker in request.node.iter_markers():
-            if marker.name in ['device', 'device_each', 'device_exclude',
-                               'device_type', 'device_type_exclude']:
-                device_markers.append(marker)
+    if serial_number is None:
+        log.debug(f"Module {request.node.name} has no device requirements")
+        yield None
+        return
 
-        if not device_markers:
-            log.debug(f"Module {request.node.name} has no device requirements")
-            yield None
-            return
+    if isinstance(serial_number, list):
+        # Multi-device path: parametrized list of serials. Sentinels are always strings,
+        # so the list form never carries skip/missing semantics.
+        names = [f"{devices.get(sn).name} [{sn}]" for sn in serial_number]
+        log.info(f"Configuration: {', '.join(names)}")
+        try:
+            devices.enable_only(serial_number, recycle=True)
+            log.debug(f"All {len(serial_number)} devices enabled and ready")
+        except Exception as e:
+            pytest.fail(f"Failed to enable devices: {e}")
+        yield serial_number
+        return
 
-        # Check for multi-device marker: device("D400*", "D400*") has multiple args
-        multi_device_marker = next(
-            (m for m in device_markers if m.name == 'device' and len(m.args) > 1), None
-        )
-
-        if multi_device_marker:
-            serial_numbers, had_candidates = find_matching_devices_multi(device_markers,
-                                                  cli_includes=request.config.getoption("--device", default=[]),
-                                                  cli_excludes=request.config.getoption("--exclude-device", default=[]))
-            expected_count = len(multi_device_marker.args)
-            if len(serial_numbers) < expected_count:
-                pytest.fail(f"Need {expected_count} devices but only {len(serial_numbers)} found")
-
-            names = [f"{devices.get(sn).name} [{sn}]" for sn in serial_numbers]
-            log.info(f"Configuration: {', '.join(names)}")
-            try:
-                devices.enable_only(serial_numbers, recycle=True)
-                log.debug(f"All {len(serial_numbers)} devices enabled and ready")
-            except Exception as e:
-                pytest.fail(f"Failed to enable devices: {e}")
-            yield serial_numbers
-            return
-
-        # Single-spec device markers reach here only if pytest_generate_tests didn't
-        # parametrize (e.g. the marker matched no devices at all).
-        serial_numbers, had_candidates = find_matching_devices(device_markers, each=False,
-                                                  cli_includes=request.config.getoption("--device", default=[]),
-                                                  cli_excludes=request.config.getoption("--exclude-device", default=[]))
-        if not serial_numbers:
-            has_required = any(m.name == 'device' for m in device_markers)
-            if had_candidates:
-                pytest.skip("All matching devices were excluded")
-            elif has_required:
-                pytest.fail("No devices found matching requirements")
-            else:
-                pytest.skip("No devices found matching requirements")
-        serial_number = serial_numbers[0]
-        log.debug(f"Module will use first matching device: {serial_number}")
+    # Single-device path (parametrized string value, including sentinels).
+    if serial_number.startswith(_SKIP_SENTINEL_PREFIX):
+        pattern = serial_number[len(_SKIP_SENTINEL_PREFIX):]
+        pytest.skip(f"No suitable devices for requirements: {pattern}")
+    if serial_number.startswith(_MISSING_SENTINEL_PREFIX):
+        pattern = serial_number[len(_MISSING_SENTINEL_PREFIX):]
+        pytest.fail(f"No devices found matching requirements: {pattern}")
+    log.debug(f"Test using parametrized device: {serial_number}")
 
     # Enable the device for this module. Module-scoped fixture lifecycle handles
     # recycle/reuse automatically: pytest re-instantiates this fixture per

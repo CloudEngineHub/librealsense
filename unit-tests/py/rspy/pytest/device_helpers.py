@@ -150,29 +150,51 @@ def resolve_device_each_serials(metafunc):
     - ``device(pattern)`` (single-spec form): exactly one instance using the first matching
       device.  If no device matches, a ``__MISSING__:pattern`` sentinel is added so that
       the test still runs and ``module_device_setup`` can call pytest.fail() for it.
-
-    Multi-spec ``device("A", "B")`` markers are *not* parametrized here — they stay
-    un-parametrized and are resolved inside ``module_device_setup`` from module-level
-    markers via ``find_matching_devices_multi``.
+    - ``device("A", "B", ...)`` (multi-spec): one instance with a *list* serial value,
+      resolved via ``find_matching_devices_multi``.  If not enough devices are present,
+      a ``__MISSING__:`` sentinel (string) is parametrized so the fixture fails the test.
     """
     device_each_markers = [m for m in metafunc.definition.iter_markers("device_each")]
-    # Single-spec device() markers only — multi-spec (e.g. device("A", "B")) are handled
-    # entirely inside module_device_setup via find_matching_devices_multi.
     single_device_markers = [
         m for m in metafunc.definition.iter_markers("device")
         if m.args and len(m.args) == 1
     ]
+    multi_device_markers = [
+        m for m in metafunc.definition.iter_markers("device")
+        if m.args and len(m.args) > 1
+    ]
 
-    # Nothing to do if the test has no single-spec device or device_each markers.
-    # (Multi-spec device() markers and marker-less tests are handled by module_device_setup.)
-    if not device_each_markers and not single_device_markers:
+    # Nothing to do if the test has no device markers at all.
+    if not device_each_markers and not single_device_markers and not multi_device_markers:
         return
-
-    all_serials = []
 
     all_markers = list(metafunc.definition.iter_markers())
     cli_includes = metafunc.config.getoption("--device", default=[])
     cli_excludes = metafunc.config.getoption("--exclude-device", default=[])
+
+    # Multi-spec is mutually exclusive with the single-spec/device_each forms — it produces
+    # exactly one parametrized instance whose value is a *list* of serials (or a sentinel
+    # string on shortage).
+    if multi_device_markers:
+        marker = multi_device_markers[0]
+        serial_numbers, _had_candidates = find_matching_devices_multi(
+            all_markers, cli_includes=cli_includes, cli_excludes=cli_excludes)
+        expected_count = len(marker.args)
+        metafunc.fixturenames.append('_test_device_serial')
+        if len(serial_numbers) < expected_count:
+            patterns = '+'.join(marker.args)
+            sentinel = f"{_MISSING_SENTINEL_PREFIX}{patterns}"
+            metafunc.parametrize("_test_device_serial", [sentinel],
+                                 ids=[f"MISSING-{patterns}"], scope="module")
+        else:
+            test_id = '+'.join(
+                f"{devices.get(sn).name}-{sn}" if devices.get(sn) else sn
+                for sn in serial_numbers)
+            metafunc.parametrize("_test_device_serial", [serial_numbers],
+                                 ids=[test_id], scope="module")
+        return
+
+    all_serials = []
     passes = _build_sn_filter(all_markers, cli_includes, cli_excludes)
 
     for marker in device_each_markers:
@@ -183,13 +205,15 @@ def resolve_device_each_serials(metafunc):
             if passes(sn) and sn not in all_serials:
                 all_serials.append(sn)
 
-    # When device() markers coexist with device_each(), resolve them here so they also
-    # receive a parametrized instance.  Each device() marker contributes exactly one
-    # serial (the first matching device), or a sentinel if none is found.
+    # Each single-spec ``device()`` marker independently contributes one parametrized
+    # instance (the first matching device, or a sentinel if none).  Multiple stacked
+    # markers like ``device("D400*"), device("D500*")`` therefore produce *two*
+    # instances and the test runs once per family — the test body is responsible for
+    # reverting any device-state changes so the shared rs.context() stays clean.
     #
-    # Two sentinel cases mirror the non-parametrized path in module_device_setup:
-    #   had_raw_match=True  → device exists but all filtered (exclude/type) → skip
-    #   had_raw_match=False → no device of this type in the lab at all      → fail
+    # Two sentinel cases mirror the resolution logic for device_each:
+    #   had_raw_match=True  → device exists but was filtered (exclude/type) → SKIP
+    #   had_raw_match=False → no device of this pattern in the lab          → MISSING
     for marker in single_device_markers:
         pattern = marker.args[0]
         found_sn = None
@@ -203,12 +227,10 @@ def resolve_device_each_serials(metafunc):
             if found_sn not in all_serials:
                 all_serials.append(found_sn)
         elif had_raw_match:
-            # Device(s) matched the pattern but were all excluded — skip gracefully.
             sentinel = f"{_SKIP_SENTINEL_PREFIX}{pattern}"
             if sentinel not in all_serials:
                 all_serials.append(sentinel)
         else:
-            # No candidates at all — device genuinely absent from the lab.
             sentinel = f"{_MISSING_SENTINEL_PREFIX}{pattern}"
             if sentinel not in all_serials:
                 all_serials.append(sentinel)
