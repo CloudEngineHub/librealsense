@@ -380,6 +380,7 @@ void dds_sensor_proxy::handle_video_data( std::vector< uint8_t > && buffer,
         = static_cast< rs2_time_t >( realdds::time_to_double( dds_sample.reception_timestamp ) * SECONDS_TO_MILLISEC );
     data.timestamp               // in ms
         = static_cast< rs2_time_t >( realdds::time_to_double( timestamp ) * SECONDS_TO_MILLISEC );
+    data.last_timestamp = streaming.last_timestamp.exchange( data.timestamp );
     data.timestamp_domain;  // from metadata, or leave default (hardware domain)
     data.depth_units;       // from metadata
     data.frame_number;      // filled in only once metadata is known
@@ -429,6 +430,7 @@ void dds_sensor_proxy::handle_motion_data( realdds::topics::imu_msg && imu,
         = static_cast< rs2_time_t >( realdds::time_to_double( sample.reception_timestamp ) * SECONDS_TO_MILLISEC );
     data.timestamp               // in ms
         = static_cast< rs2_time_t >( realdds::time_to_double( imu.timestamp() ) * SECONDS_TO_MILLISEC );
+    data.last_timestamp = streaming.last_timestamp.exchange( data.timestamp );
     data.timestamp_domain;  // leave default (hardware domain)
     data.last_frame_number = streaming.last_frame_number.fetch_add( 1 );
     data.frame_number = data.last_frame_number + 1;
@@ -500,6 +502,7 @@ void dds_sensor_proxy::handle_inference_data( realdds::topics::string_msg && msg
         = static_cast< rs2_time_t >( realdds::time_to_double( sample.reception_timestamp ) * SECONDS_TO_MILLISEC );
     if( auto ts_j = j.nested( "timestamp_us" ) )  // timestamp as provided by the inference engine, convert to millisec
         data.timestamp = ts_j.get< double >() * MICROSEC_TO_MILLISEC;
+    data.last_timestamp = streaming.last_timestamp.exchange( data.timestamp );
     data.timestamp_domain;                        // leave default (hardware domain)
     // If frame_id supplied, we try to use it. If not supplied, we use an increasing counter.
     if( j.nested( "frame_id" ).get_ex( data.frame_number ) )
@@ -636,6 +639,7 @@ void dds_sensor_proxy::add_frame_metadata( frame * const f,
     // purposes, so we ignore here. The domain is optional, and really only rs-dds-adapter communicates it
     // because the source is librealsense...
     f->additional_data.timestamp;
+    md_header.nested( realdds::topics::metadata::header::key::timestamp_domain ).get_ex( f->additional_data.timestamp_domain );
 
     if( ! md.empty() )
     {
