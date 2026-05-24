@@ -9,7 +9,6 @@
 #include <map>
 #include <string>
 #include <cstring>
-#include <cstdlib>
 #include <iostream>
 #include <fstream>
 #include <thread>
@@ -408,18 +407,6 @@ try
     {
         selected_serial_number = serial_number_arg.getValue();
         std::cout << std::endl << "Search for device with serial number: " << selected_serial_number << std::endl;
-    }
-    else if (const char* env_sn = std::getenv("RS2_FW_UPDATE_SERIAL"))
-    {
-        // Fallback for callers that can't easily pass -s (e.g. test-fw-update.py invoked
-        // by run-unit-tests.py on a Jetson where a GMSL device coexists with the USB one
-        // we want to flash). Behaves exactly as if -s <env value> were passed.
-        if (env_sn[0] != '\0')
-        {
-            selected_serial_number = env_sn;
-            std::cout << std::endl << "Search for device with serial number (from RS2_FW_UPDATE_SERIAL): "
-                      << selected_serial_number << std::endl;
-        }
     }
 
 

@@ -485,6 +485,9 @@ def test_wrapper_( test, configuration=None, repetition=1, curr_retry=0, max_ret
     if test.name == "test-fw-update" and custom_fw_d555_path:
         opts.append('--custom-fw-d555')
         opts.append(custom_fw_d555_path)
+    if test.name == 'test-fw-update' and sns and len( sns ) == 1:
+        opts.append( '--serial' )
+        opts.append( next( iter( sns ) ) )
     try:
         test.run_test( configuration = configuration, log_path = log_path, opts = opts )
     except FileNotFoundError as e:
@@ -507,39 +510,23 @@ def test_wrapper_( test, configuration=None, repetition=1, curr_retry=0, max_ret
 def test_wrapper( test, configuration=None, repetition=1, serial_numbers=None, custom_fw_d400_override=None ):
     global n_tests, n_failed_tests, retries
     n_tests += 1
-    # When running test-fw-update on a single device, expose its serial number to the rs-fw-update
-    # binary so it can disambiguate when multiple devices are connected (e.g. Jetson with a GMSL
-    # device alongside the USB one we want to flash). rs-fw-update treats RS2_FW_UPDATE_SERIAL as
-    # a fallback for -s.
-    prev_serial_env = os.environ.get( 'RS2_FW_UPDATE_SERIAL' )
-    set_serial_env = False
-    if test.name == 'test-fw-update' and serial_numbers and len( serial_numbers ) == 1:
-        os.environ['RS2_FW_UPDATE_SERIAL'] = next( iter( serial_numbers ) )
-        set_serial_env = True
-    try:
-        retry_count = max(test.config.retries, retries)
-        for retry in range( retry_count + 1 ):
-            if retry:
-                if log.is_debug_on():
-                    log.debug_unindent()  # just to make it stand out a little more
-                    log.d( f'  Failed; retry #{retry}' )
-                    log.debug_indent()
-                if no_reset or not serial_numbers:
-                    time.sleep(1)  # small pause between tries
-                else:
-                    devices.enable_only( serial_numbers, recycle=True )
-            if test_wrapper_( test, configuration, repetition, retry, retry_count, serial_numbers,
-                              custom_fw_d400_override=custom_fw_d400_override ):
-                return True
-
-        n_failed_tests += 1
-        return False
-    finally:
-        if set_serial_env:
-            if prev_serial_env is None:
-                os.environ.pop( 'RS2_FW_UPDATE_SERIAL', None )
+    retry_count = max(test.config.retries, retries)
+    for retry in range( retry_count + 1 ):
+        if retry:
+            if log.is_debug_on():
+                log.debug_unindent()  # just to make it stand out a little more
+                log.d( f'  Failed; retry #{retry}' )
+                log.debug_indent()
+            if no_reset or not serial_numbers:
+                time.sleep(1)  # small pause between tries
             else:
-                os.environ['RS2_FW_UPDATE_SERIAL'] = prev_serial_env
+                devices.enable_only( serial_numbers, recycle=True )
+        if test_wrapper_( test, configuration, repetition, retry, retry_count, serial_numbers,
+                          custom_fw_d400_override=custom_fw_d400_override ):
+            return True
+
+    n_failed_tests += 1
+    return False
 
 
 def close_hubs():
