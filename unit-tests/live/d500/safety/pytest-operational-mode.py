@@ -77,18 +77,24 @@ def test_resume_to_maintenance_keeps_video_streaming(test_context):
 
         log.debug("Command run mode")
         safety_sensor.set_option(rs.option.safety_mode, rs.safety_mode.run)
+        log.debug(f"Current mode: {safety_sensor.get_option(rs.option.safety_mode)}")
         check.equal(safety_sensor.get_option(rs.option.safety_mode), float(rs.safety_mode.run))
         # Verify that on RUN mode we get frames
         verify_frames_received(pipe, count=10)
 
+        log.debug("Stabilization delay after switching to RUN mode")
+        time.sleep(2)
+
         log.debug("Command service mode")
         safety_sensor.set_option(rs.option.safety_mode, rs.safety_mode.service)
+        log.debug(f"Current mode: {safety_sensor.get_option(rs.option.safety_mode)}")
         check.equal(safety_sensor.get_option(rs.option.safety_mode), float(rs.safety_mode.service))
         verify_frames_received(pipe, count=10)
 
         # Restore Run mode
         log.debug("Command run mode")
         safety_sensor.set_option(rs.option.safety_mode, rs.safety_mode.run)
+        log.debug(f"Current mode: {safety_sensor.get_option(rs.option.safety_mode)}")
         check.equal(safety_sensor.get_option(rs.option.safety_mode), float(rs.safety_mode.run))
         # Verify that on RUN mode we get frames
         verify_frames_received(pipe, count=10)
