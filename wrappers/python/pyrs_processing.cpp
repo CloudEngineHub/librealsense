@@ -90,6 +90,18 @@ void init_processing(py::module &m) {
                                                           "get better performance. Othere implementations (GLSL, OpenCL, Neon, NCS) should follow.");
     yuy_decoder.def(py::init<>());
 
+    py::class_<rs2::m420_decoder, rs2::filter> m420_decoder(m, "m420_decoder",
+        "Converts raw M420 frames (YUV 4:2:0 single-plane: 2 lines of Y followed by 1 interleaved UV line) to RGB.");
+    m420_decoder.def(py::init<>());
+
+    py::class_<rs2::nv12_decoder, rs2::filter> nv12_decoder(m, "nv12_decoder",
+        "Converts raw NV12 frames (YUV 4:2:0 semi-planar: full Y plane followed by interleaved half-res UV) to RGB.");
+    nv12_decoder.def(py::init<>());
+
+    py::class_<rs2::uyvy_decoder, rs2::filter> uyvy_decoder(m, "uyvy_decoder",
+        "Converts raw UYVY frames (YUV 4:2:2 packed: U Y0 V Y1 per pixel pair) to RGB.");
+    uyvy_decoder.def(py::init<>());
+
     py::class_<rs2::threshold_filter, rs2::filter> threshold(m, "threshold_filter", "Depth thresholding filter. By controlling min and "
                                                              "max options on the block, one could filter out depth values that are either too large "
                                                              "or too small, as a software post-processing step");

@@ -584,6 +584,28 @@ namespace rs2
         }
     };
 
+    class uyvy_decoder : public filter
+    {
+    public:
+        /** Creates UYVY decoder processing block. Accepts raw UYVY 4:2:2 frames and outputs RGB. */
+        uyvy_decoder() : filter(init(), 1) { }
+
+    protected:
+        uyvy_decoder(std::shared_ptr<rs2_processing_block> block) : filter(block, 1) {}
+
+    private:
+        std::shared_ptr<rs2_processing_block> init()
+        {
+            rs2_error* e = nullptr;
+            auto block = std::shared_ptr<rs2_processing_block>(
+                rs2_create_uyvy_decoder(&e),
+                rs2_delete_processing_block);
+            error::handle(e);
+
+            return block;
+        }
+    };
+
     class y411_decoder : public filter
     {
     public:
