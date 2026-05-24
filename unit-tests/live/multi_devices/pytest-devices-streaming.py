@@ -249,9 +249,11 @@ def stream_multi_and_check_frames(devs, stream_configs, duration_sec=STREAM_DURA
 def run_phase(phase_label, device_list, stream_configs):
     """Run one streaming phase, print the results table, and assert drop/independence checks."""
     log.info("=" * 80)
-    log.info(f"{phase_label}: streaming {len(stream_configs)} stream(s) on {len(device_list)} device(s)")
+    log.info(f"{phase_label}")
+    log.info(f"Found {len(stream_configs)} common stream types")
     for stream_type, stream_index, w, h, fmt, fps in stream_configs:
         log.info(f"  Selected profile: {stream_type} (stream_index {stream_index}): {w}x{h} @ {fps}fps, format {fmt}")
+    log.info(f"Will stream all of them simultaneously from all {len(device_list)} devices")
     log.info("=" * 80)
 
     success, drop_percentages, stats = stream_multi_and_check_frames(
@@ -280,11 +282,13 @@ def run_phase(phase_label, device_list, stream_configs):
     log.info("=" * 80)
 
     if success:
-        log.info(f"{phase_label} PASS - drop rates within tolerance")
+        log.info(f"{phase_label} PASS - Multi-stream test successful!")
+        for i, drop_pct in enumerate(drop_percentages, 1):
+            log.info(f"  Device {i} drop rate: {drop_pct:.2f}%")
     else:
         log.warning(f"{phase_label} FAIL - Excessive frame drops detected!")
-    for i, drop_pct in enumerate(drop_percentages, 1):
-        log.info(f"  Device {i} drop rate: {drop_pct:.2f}% (max: {MAX_FRAME_DROP_PERCENTAGE}%)")
+        for i, drop_pct in enumerate(drop_percentages, 1):
+            log.warning(f"  Device {i} drop rate: {drop_pct:.2f}% (max: {MAX_FRAME_DROP_PERCENTAGE}%)")
 
     check.is_true(success,
         f"{phase_label}: Multi-stream operation should have <{MAX_FRAME_DROP_PERCENTAGE}% drops on all devices")
