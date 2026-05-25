@@ -3,7 +3,7 @@ import { useAppStore } from '../store'
 import { WebRTCHandler } from '../api/webrtc'
 import { apiClient } from '../api/client'
 import { DepthLegend } from './DepthLegend'
-import type { DeviceState, StreamConfig } from '../api/types'
+import type { DeviceState, StreamConfig, StreamMetadata } from '../api/types'
 
 // A stream with its device context
 interface DeviceStream {
@@ -12,12 +12,7 @@ interface DeviceStream {
   serialNumber: string
   config: StreamConfig
   isStreaming: boolean
-  metadata?: {
-    timestamp: number
-    frame_number: number
-    width: number
-    height: number
-  }
+  metadata?: StreamMetadata
 }
 
 export function StreamViewer() {
@@ -137,12 +132,7 @@ interface StreamTileProps {
   streamType: string
   isStreaming: boolean
   showDeviceName?: boolean
-  metadata?: {
-    timestamp: number
-    frame_number: number
-    width: number
-    height: number
-  }
+  metadata?: StreamMetadata
 }
 
 function StreamTile({ deviceId, deviceName, serialNumber, streamType, isStreaming, showDeviceName, metadata }: StreamTileProps) {
@@ -152,6 +142,14 @@ function StreamTile({ deviceId, deviceName, serialNumber, streamType, isStreamin
   const hoverRequestId = useRef(0)
   const [connectionState, setConnectionState] = useState<RTCPeerConnectionState | null>(null)
   const [fps, setFps] = useState(0)
+  const [showMetadata, setShowMetadata] = useState(false)
+
+  // Auto-close metadata panel when stream stops so the next session starts clean.
+  useEffect(() => {
+    if (!isStreaming) {
+      setShowMetadata(false)
+    }
+  }, [isStreaming]) // re-run only on streaming state changes
   const lastFrameTime = useRef(0)
   const frameCount = useRef(0)
   const [hoverDepth, setHoverDepth] = useState<{
@@ -372,14 +370,62 @@ function StreamTile({ deviceId, deviceName, serialNumber, streamType, isStreamin
         </div>
       )}
 
-      {/* Metadata Overlay */}
-      {isStreaming && metadata && (
-        <div className="absolute bottom-2 left-2 right-2 flex justify-between text-xs text-white bg-black/50 px-2 py-1 rounded">
-          <span>
-            {metadata.width}×{metadata.height}
-          </span>
-          <span>Frame: {metadata.frame_number}</span>
-          <span>{fps} FPS</span>
+      {/* Metadata toggle button (hidden when panel is open) */}
+      {isStreaming && !showMetadata && metadata?.frame_metadata && Object.keys(metadata.frame_metadata).length > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowMetadata(true)}
+          className={`absolute ${showDeviceName ? 'top-7' : 'top-2'} right-2 px-2 py-1 bg-black/60 hover:bg-black/80 rounded text-xs text-white border border-gray-600`}
+          title="Show frame metadata"
+        >
+          MD
+        </button>
+      )}
+
+      {/* Metadata Panel - covers full tile */}
+      {isStreaming && showMetadata && metadata?.frame_metadata && (
+        <div className="absolute inset-0 overflow-y-auto bg-black/90 text-white text-xs z-10">
+          <div className="sticky top-0 px-3 py-2 bg-gray-800 font-semibold border-b border-gray-700 flex items-center justify-between">
+            <span>Frame Metadata — {streamType.toUpperCase()}</span>
+            <div className="flex items-center gap-3">
+              <span className="text-gray-400 font-normal">
+                {Object.keys(metadata.frame_metadata).length} attrs
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowMetadata(false)}
+                className="px-2 py-0.5 bg-gray-700 hover:bg-gray-600 rounded border border-gray-500"
+                title="Close metadata panel"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+          <div className="px-3 py-2 border-b border-gray-700 bg-gray-900/60">
+            <div className="text-gray-400 uppercase tracking-wide text-[10px] mb-1">Viewer Info</div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono">
+              <div className="flex justify-between border-b border-gray-800/50 py-0.5">
+                <span className="text-gray-300 truncate pr-2">resolution</span>
+                <span className="text-right shrink-0">{metadata.width}×{metadata.height}</span>
+              </div>
+              <div className="flex justify-between border-b border-gray-800/50 py-0.5">
+                <span className="text-gray-300 truncate pr-2">frame_number</span>
+                <span className="text-right shrink-0">{metadata.frame_number}</span>
+              </div>
+              <div className="flex justify-between border-b border-gray-800/50 py-0.5">
+                <span className="text-gray-300 truncate pr-2">fps</span>
+                <span className="text-right shrink-0">{fps}</span>
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 p-3 font-mono">
+            {Object.entries(metadata.frame_metadata).map(([k, v]) => (
+              <div key={k} className="flex justify-between border-b border-gray-800/50 py-0.5">
+                <span className="text-gray-300 truncate pr-2">{k}</span>
+                <span className="text-right shrink-0">{v}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -418,20 +464,13 @@ function StreamTile({ deviceId, deviceName, serialNumber, streamType, isStreamin
         </div>
       )}
 
-      {/* Hover Depth Tooltip (for depth streams) */}
-      {isDepthStream && hoverDepth && (
-        <div
-          className="absolute bg-black/90 text-white text-sm px-3 py-2 rounded shadow-lg pointer-events-none z-20"
-          style={{
-            left: `${hoverDepth.mouseX + 14}px`,
-            top: `${hoverDepth.mouseY + 14}px`,
-            willChange: 'transform',
-          }}
-        >
-          <div className="font-mono">
+      {/* Depth pixel info (fixed bottom-left, hidden in metadata view) */}
+      {isDepthStream && hoverDepth && !showMetadata && (
+        <div className="absolute bottom-2 left-2 bg-black/80 text-white text-xs px-2 py-1 rounded shadow pointer-events-none font-mono">
+          <div>
             <span className="text-gray-400">Pixel:</span> ({hoverDepth.x}, {hoverDepth.y})
           </div>
-          <div className="font-mono font-bold">
+          <div className="font-bold">
             <span className="text-gray-400">Depth:</span>{' '}
             {hoverDepth.depth !== null ? `${hoverDepth.depth.toFixed(3)} m` : 'N/A'}
           </div>

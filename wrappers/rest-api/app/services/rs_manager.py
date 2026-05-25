@@ -69,6 +69,10 @@ class RealSenseManager:
         # Store latest raw depth frames for pixel depth queries
         self.depth_frames: Dict[str, Any] = {}  # device_id -> rs.depth_frame
 
+        # Cache of supported frame_metadata values per stream profile uid.
+        # Avoids re-probing every metadata key on every frame in the hot loop.
+        self._supported_md_by_profile: Dict[int, list] = {}
+
         self.sio = sio
         self.metadata_socket_server = MetadataSocketServer(sio, self)
 
@@ -1177,6 +1181,38 @@ class RealSenseManager:
                     detail=f"Stream type '{stream_key}' is not active for device {device_id}.",
                 )
 
+    # TODO: replace with `list(rs.frame_metadata_value)` once pyrealsense2 ships
+    # with pybind11 >= 2.12 (added __iter__ on py::enum_). Current PyPI wheels
+    # use older pybind11 where the enum is not iterable.
+    _FRAME_METADATA_VALUES = list(rs.frame_metadata_value.__members__.values())
+
+    def _get_frame_metadata(self, frame_data) -> Dict[str, int]:
+        """Return all rs2_frame_metadata_value attributes the frame supports.
+        Mirrors common/stream-model.cpp:52-59 in the C++ realsense-viewer.
+        Caches the supported subset per stream profile uid so the per-frame cost
+        is one cheap dict lookup + N get_frame_metadata calls (N = supported count)."""
+        try:
+            profile_uid = frame_data.get_profile().unique_id()
+        except Exception:
+            profile_uid = None
+
+        supported = self._supported_md_by_profile.get(profile_uid) if profile_uid is not None else None
+        if supported is None:
+            supported = [md for md in self._FRAME_METADATA_VALUES
+                         if frame_data.supports_frame_metadata(md)]
+            if profile_uid is not None:
+                self._supported_md_by_profile[profile_uid] = supported
+
+        attrs: Dict[str, int] = {}
+        for md in supported:
+            try:
+                attrs[md.name] = frame_data.get_frame_metadata(md)
+            except Exception as e:
+                # supports_frame_metadata said yes; getting the value should not throw.
+                logging.debug("[METADATA] failed to read %s: %s", md.name, e)
+                continue
+        return attrs
+
     def _collect_frames(self, device_id: str, align_processor=None):
         """Thread function to collect frames from the pipeline"""
         logging.debug("[INFO] Frame collection thread started for device %s", device_id)
@@ -1276,6 +1312,7 @@ class RealSenseManager:
                                 "frame_number": frame_data.get_frame_number(),
                                 "width": getattr(frame_data, "get_width", lambda: 640)() or 640,
                                 "height": getattr(frame_data, "get_height", lambda: 480)() or 480,
+                                "frame_metadata": self._get_frame_metadata(frame_data),
                             }
 
                             if rs_stream == rs.stream.gyro or rs_stream == rs.stream.accel:
@@ -1578,6 +1615,7 @@ class RealSenseManager:
         metadata: dict = {
             "timestamp": frame.get_timestamp(),
             "frame_number": frame.get_frame_number(),
+            "frame_metadata": self._get_frame_metadata(frame),
         }
 
         if "depth" in frame_stream_name:

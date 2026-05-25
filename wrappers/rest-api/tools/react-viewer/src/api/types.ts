@@ -107,6 +107,7 @@ export interface StreamMetadata {
   height: number
   motion_data?: IMUData
   point_cloud?: PointCloudData
+  frame_metadata?: Record<string, number>
 }
 
 export interface IMUData {
