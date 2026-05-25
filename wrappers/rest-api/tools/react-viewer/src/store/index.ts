@@ -216,6 +216,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
   hasUserInteracted: false,
   
   fetchDevices: async (forceRefresh = false) => {
+    // Guard against concurrent fetches: a slow force-refresh must not be clobbered
+    // by a cache-hit poll that resolves after it.
+    if (get().isLoadingDevices) return
     set({ isLoadingDevices: true, error: null })
     try {
       const devices = await apiClient.getDevices(forceRefresh)
@@ -259,12 +262,14 @@ export const useAppStore = create<AppState>()((set, get) => ({
           }
         }
 
-        // Drop selectedDevice pointer if its device disappeared
-        const selectedStillPresent =
-          state.selectedDevice && devices.some(d => d.device_id === state.selectedDevice!.device_id)
-        const selectedDevice = selectedStillPresent
-          ? devices.find(d => d.device_id === state.selectedDevice!.device_id) || null
-          : null
+        // Only reconcile selectedDevice on a forced re-enumeration. The 5s poll
+        // can return a momentarily-stale cached list and must not silently null
+        // the user's selection.
+        let selectedDevice = state.selectedDevice
+        if (forceRefresh && state.selectedDevice) {
+          selectedDevice =
+            devices.find(d => d.device_id === state.selectedDevice!.device_id) || null
+        }
 
         return { devices, deviceStates: newDeviceStates, selectedDevice, isLoadingDevices: false }
       })

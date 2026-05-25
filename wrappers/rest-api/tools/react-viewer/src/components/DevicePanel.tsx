@@ -57,8 +57,10 @@ export function DevicePanel() {
         <button
           onClick={() => fetchDevices(true)}
           disabled={isLoadingDevices}
+          aria-label={isLoadingDevices ? 'Refreshing devices…' : 'Refresh devices'}
+          aria-busy={isLoadingDevices}
           className="p-2 hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          title="Refresh devices"
+          title={isLoadingDevices ? 'Refreshing…' : 'Refresh devices'}
         >
           <svg
             className={`w-5 h-5 ${isLoadingDevices ? 'animate-spin' : ''}`}
