@@ -13,8 +13,10 @@ from rspy import repo, log as rspy_log
 log = logging.getLogger('librealsense')
 
 # Shared format for both the per-test FileHandler and the -s live CLI handler.
-# Leading timestamp is wall-clock HH:MM:SS.mmm — date is implicit (one log per test run).
-_LOG_FORMAT = '%(asctime)s.%(msecs)03d -%(levelname).1s- %(message)s'
+# Leading timestamp is local wall-clock HH:MM:SS.mmm — date is implicit (one log
+# per test run). %03.0f rounds msecs; %03d would truncate (999.9 → 999, not 1000).
+# If cross-timezone correlation is ever needed, set Formatter.converter = time.gmtime.
+_LOG_FORMAT = '%(asctime)s.%(msecs)03.0f -%(levelname).1s- %(message)s'
 _LOG_DATEFMT = '%H:%M:%S'
 
 # unit-tests/ directory — used as fallback for log output
@@ -170,6 +172,9 @@ def start_test_log(item):
     log_name = test_log_name(item)
     log_path = os.path.join(logdir, log_name)
     try:
+        # mode='w': retries of the same (file, device) overwrite the previous
+        # pass's log so the Jenkins report links to the latest attempt.
+        # Appending would interleave timestamps from different passes.
         file_handler = logging.FileHandler(log_path, mode='w')
         file_handler.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt=_LOG_DATEFMT))
         file_handler.setLevel(logging.DEBUG)
