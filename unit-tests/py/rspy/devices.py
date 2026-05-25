@@ -156,9 +156,12 @@ class Device:
         return self._is_dds
 
 
-def wait_until_all_ports_disabled( timeout = 5 ):
+def wait_until_all_ports_disabled( timeout = 10 ):
     """
-    Waits for all ports to be disabled
+    Waits for all ports to be disabled.
+    Default 10s accommodates DDS devices (e.g. D555 over PoE), whose removal is
+    only detected after the DDS participant lease (3s) expires past the last
+    announcement (1.5s cycle).
     """
     for retry in range( timeout ):
         if len( enabled() ) == 0:
