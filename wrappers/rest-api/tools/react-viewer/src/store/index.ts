@@ -112,7 +112,7 @@ interface AppState {
   deviceStates: Record<string, DeviceState> // keyed by device_id
   isLoadingDevices: boolean
   hasUserInteracted: boolean // Track if user manually toggled a device (skip auto-activate)
-  fetchDevices: () => Promise<void>
+  fetchDevices: (forceRefresh?: boolean) => Promise<void>
   checkFirmwareUpdates: (deviceId: string) => Promise<void>
 
   // Device activation (multi-select support)
@@ -215,10 +215,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
   isLoadingDevices: false,
   hasUserInteracted: false,
   
-  fetchDevices: async () => {
+  fetchDevices: async (forceRefresh = false) => {
     set({ isLoadingDevices: true, error: null })
     try {
-      const devices = await apiClient.getDevices()
+      const devices = await apiClient.getDevices(forceRefresh)
       // Update devices list, preserve existing device states for known devices
       set((state) => {
         const newDeviceStates = { ...state.deviceStates }
@@ -259,7 +259,14 @@ export const useAppStore = create<AppState>()((set, get) => ({
           }
         }
 
-        return { devices, deviceStates: newDeviceStates, isLoadingDevices: false }
+        // Drop selectedDevice pointer if its device disappeared
+        const selectedStillPresent =
+          state.selectedDevice && devices.some(d => d.device_id === state.selectedDevice!.device_id)
+        const selectedDevice = selectedStillPresent
+          ? devices.find(d => d.device_id === state.selectedDevice!.device_id) || null
+          : null
+
+        return { devices, deviceStates: newDeviceStates, selectedDevice, isLoadingDevices: false }
       })
       
       // Auto-activate if exactly 1 device and user hasn't manually interacted

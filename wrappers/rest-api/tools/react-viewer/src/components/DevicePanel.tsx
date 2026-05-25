@@ -55,8 +55,9 @@ export function DevicePanel() {
       <div className="flex items-center justify-between mb-4">
         <h2 className="panel-header mb-0">Devices</h2>
         <button
-          onClick={() => fetchDevices()}
-          className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+          onClick={() => fetchDevices(true)}
+          disabled={isLoadingDevices}
+          className="p-2 hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           title="Refresh devices"
         >
           <svg
