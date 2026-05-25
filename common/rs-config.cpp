@@ -72,7 +72,12 @@ void config_file::save(const char* filename)
     {
         std::ostringstream oss;
         oss << std::setw(2) << _j;
-        rsutils::os::atomic_write_file(filename, oss.str());
+        auto result = rsutils::os::atomic_write_file(filename, oss.str());
+
+        if (!result)
+        {
+            // save failed, perhaps add some logging here
+        }
     }
     catch (...)
     {
