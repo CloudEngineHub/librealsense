@@ -338,6 +338,83 @@ class TestRealSenseAPI:
         assert status["device_id"] == "device1"
         assert "is_streaming" in status
 
+    # ----- Tests for the firmware update_from_file endpoint -----
+
+    def test_update_firmware_from_file_happy_path(self, patch_dependencies):
+        rs_manager = patch_dependencies["rs_manager"]
+        rs_manager.update_firmware_from_bytes = MagicMock(
+            return_value={
+                "device_id": "device1",
+                "progress": 1.0,
+                "firmware_version": "1.2.3",
+                "status": "success",
+            }
+        )
+        files = {"file": ("D4XX_FW.bin", b"\x00\x01\x02\x03", "application/octet-stream")}
+        response = client.post(
+            "/api/v1/devices/device1/firmware/update_from_file", files=files
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "success"
+        # Manager called with device_id + bytes payload
+        args, _ = rs_manager.update_firmware_from_bytes.call_args
+        assert args[0] == "device1"
+        assert args[1] == b"\x00\x01\x02\x03"
+
+    def test_update_firmware_from_file_rejects_non_bin_extension(self, patch_dependencies):
+        rs_manager = patch_dependencies["rs_manager"]
+        rs_manager.update_firmware_from_bytes = MagicMock()
+        files = {"file": ("firmware.txt", b"hello", "text/plain")}
+        response = client.post(
+            "/api/v1/devices/device1/firmware/update_from_file", files=files
+        )
+        assert response.status_code == 400
+        assert ".bin" in response.json()["detail"]
+        rs_manager.update_firmware_from_bytes.assert_not_called()
+
+    def test_update_firmware_from_file_rejects_empty(self, patch_dependencies):
+        rs_manager = patch_dependencies["rs_manager"]
+        rs_manager.update_firmware_from_bytes = MagicMock()
+        files = {"file": ("empty.bin", b"", "application/octet-stream")}
+        response = client.post(
+            "/api/v1/devices/device1/firmware/update_from_file", files=files
+        )
+        assert response.status_code == 400
+        assert "empty" in response.json()["detail"].lower()
+        rs_manager.update_firmware_from_bytes.assert_not_called()
+
+    def test_update_firmware_from_file_rejects_oversize(self, patch_dependencies):
+        from app.api.endpoints import firmware as firmware_module
+
+        rs_manager = patch_dependencies["rs_manager"]
+        rs_manager.update_firmware_from_bytes = MagicMock()
+        # Temporarily shrink the cap so we don't have to allocate 64 MiB just to test the path.
+        original_cap = firmware_module.MAX_FW_UPLOAD_BYTES
+        firmware_module.MAX_FW_UPLOAD_BYTES = 16
+        try:
+            files = {"file": ("big.bin", b"X" * 32, "application/octet-stream")}
+            response = client.post(
+                "/api/v1/devices/device1/firmware/update_from_file", files=files
+            )
+        finally:
+            firmware_module.MAX_FW_UPLOAD_BYTES = original_cap
+        assert response.status_code == 413
+        rs_manager.update_firmware_from_bytes.assert_not_called()
+
+    def test_update_firmware_from_file_propagates_sdk_error(self, patch_dependencies):
+        from app.services.rs_manager import RealSenseError
+
+        rs_manager = patch_dependencies["rs_manager"]
+        rs_manager.update_firmware_from_bytes = MagicMock(
+            side_effect=RealSenseError(status_code=400, detail="Firmware is not compatible")
+        )
+        files = {"file": ("bad.bin", b"\xff" * 8, "application/octet-stream")}
+        response = client.post(
+            "/api/v1/devices/device1/firmware/update_from_file", files=files
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Firmware is not compatible"
+
     # ----- Tests for the WebRTC API -----
 
     @pytest.mark.asyncio

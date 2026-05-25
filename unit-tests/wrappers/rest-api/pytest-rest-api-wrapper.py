@@ -22,7 +22,26 @@ pytestmark = [
 ]
 
 
+def _ensure_rest_api_deps_installed():
+    """pip-install rest-api + rest-api test deps on the current interpreter.
+
+    Jenkins/CI agents use a pre-baked Python env that doesn't auto-pick up
+    additions to requirements.txt (e.g. python-multipart, required as soon as
+    a FastAPI endpoint declares File/UploadFile). Installing here keeps the
+    wrapper self-contained instead of depending on out-of-band agent setup.
+    """
+    rest_api_req = os.path.join(repo.root, "wrappers", "rest-api", "requirements.txt")
+    test_req = os.path.join(repo.root, "unit-tests", "wrappers", "rest-api", "requirements.txt")
+    cmd = [sys.executable, "-m", "pip", "install", "--user", "-q",
+           "-r", rest_api_req, "-r", test_req]
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       universal_newlines=True, check=False, timeout=600)
+    if p.returncode != 0:
+        log.warning("pip install for rest-api deps returned %s:\n%s", p.returncode, p.stdout)
+
+
 def test_rest_api_wrapper(module_device_setup):
+    _ensure_rest_api_deps_installed()
     rest_api_test = os.path.join(repo.root, "wrappers", "rest-api", "tests", "test_api_service.py")
     # The subprocess starts a fresh interpreter, so the parent's sys.path
     # injection of the locally-built pyrealsense2 (unit-tests/conftest.py)
