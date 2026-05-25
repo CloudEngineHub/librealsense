@@ -197,9 +197,12 @@ describe('DevicePanel', () => {
     })
 
     it('is disabled while a fetch is in flight', () => {
-      useAppStore.setState({ isLoadingDevices: true })
-
-      render(<DevicePanel />)
+      // Must use initialStoreState (not pre-render setState) because
+      // renderWithProviders calls resetStore() first, which would reset
+      // isLoadingDevices back to false.
+      render(<DevicePanel />, {
+        initialStoreState: { isLoadingDevices: true },
+      })
 
       const refreshButton = screen.getByLabelText('Refreshing devices…')
       expect(refreshButton).toBeDisabled()

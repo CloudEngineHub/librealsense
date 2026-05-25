@@ -21,10 +21,10 @@ describe('AppStore', () => {
       expect(state.error).toBeNull()
     })
 
-    it('starts with grid view mode', () => {
+    it('starts in 2d view mode', () => {
       const state = useAppStore.getState()
-      
-      expect(state.viewMode).toBe('grid')
+
+      expect(state.viewMode).toBe('2d')
     })
 
     it('starts with chat closed', () => {
