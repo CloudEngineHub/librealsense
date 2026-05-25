@@ -124,12 +124,17 @@ config_file& config_file::operator=(const config_file& other)
 {
     if (this != &other)
     {
-        // Lock both sides; std::lock avoids deadlock on the (theoretical) reverse-direction race.
-        std::lock( _mutex, other._mutex );
-        std::lock_guard< std::recursive_mutex > lk_this( _mutex, std::adopt_lock );
-        std::lock_guard< std::recursive_mutex > lk_other( other._mutex, std::adopt_lock );
-        _j = other._j;
-        _defaults = other._defaults;
+        // Snapshot under other's lock only, so the disk write below doesn't block readers of `other`.
+        rsutils::json j_copy;
+        std::map< std::string, std::string > defaults_copy;
+        {
+            std::lock_guard< std::recursive_mutex > lk_other( other._mutex );
+            j_copy = other._j;
+            defaults_copy = other._defaults;
+        }
+        std::lock_guard< std::recursive_mutex > lk_this( _mutex );
+        _j = std::move( j_copy );
+        _defaults = std::move( defaults_copy );
         save();
     }
     return *this;
@@ -137,6 +142,7 @@ config_file& config_file::operator=(const config_file& other)
 
 bool config_file::operator==(const config_file& other) const
 {
+    if (this == &other) return true;
     std::lock( _mutex, other._mutex );
     std::lock_guard< std::recursive_mutex > lk_this( _mutex, std::adopt_lock );
     std::lock_guard< std::recursive_mutex > lk_other( other._mutex, std::adopt_lock );
