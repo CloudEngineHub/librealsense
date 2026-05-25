@@ -218,12 +218,26 @@ function StreamTile({ deviceId, deviceName, serialNumber, streamType, isStreamin
       if (!isDepthStream || !isStreaming || !containerRef.current || !metadata) return
 
       const rect = containerRef.current.getBoundingClientRect()
-      const x = Math.floor(((e.clientX - rect.left) / rect.width) * metadata.width)
-      const y = Math.floor(((e.clientY - rect.top) / rect.height) * metadata.height)
       const mouseX = e.clientX - rect.left
       const mouseY = e.clientY - rect.top
 
-      // Bounds check
+      // The <video> uses object-contain so it is letterboxed within the tile.
+      // Compute the actual displayed video rect and ignore the bars.
+      const scale = Math.min(rect.width / metadata.width, rect.height / metadata.height)
+      const displayW = metadata.width * scale
+      const displayH = metadata.height * scale
+      const offsetX = (rect.width - displayW) / 2
+      const offsetY = (rect.height - displayH) / 2
+
+      if (mouseX < offsetX || mouseX >= offsetX + displayW ||
+          mouseY < offsetY || mouseY >= offsetY + displayH) {
+        setHoverDepth(null)
+        return
+      }
+
+      const x = Math.floor((mouseX - offsetX) / displayW * metadata.width)
+      const y = Math.floor((mouseY - offsetY) / displayH * metadata.height)
+
       if (x < 0 || x >= metadata.width || y < 0 || y >= metadata.height) {
         setHoverDepth(null)
         return
