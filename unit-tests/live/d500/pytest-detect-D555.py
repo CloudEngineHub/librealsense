@@ -7,6 +7,7 @@
 import pytest
 import pyrealsense2 as rs
 import pyrsutils as rsutils
+from pytest_check import check
 from rspy import config_file, devices
 from rspy.snippets import is_dds_dev
 from time import sleep
@@ -29,7 +30,7 @@ def test_detect_D555(module_device_setup):
     if len(devs) > 0:
         dev = devs[0]
         dev_found = is_dds_dev(dev)
-    assert dev_found
+    check.is_true(dev_found)
 
     # Sometime, due to yet unresolved issue, camera domain resets back to 0.
     # All the unit tests expect a certain domain (from config) so we will try to find it and update the domain
