@@ -396,51 +396,13 @@ function StreamTile({ deviceId, deviceName, serialNumber, streamType, isStreamin
         </button>
       )}
 
-      {/* Metadata Panel - covers full tile */}
       {isStreaming && showMetadata && metadata?.frame_metadata && (
-        <div className="absolute inset-0 overflow-y-auto bg-black/90 text-white text-xs z-10">
-          <div className="sticky top-0 px-3 py-2 bg-gray-800 font-semibold border-b border-gray-700 flex items-center justify-between">
-            <span>Frame Metadata — {streamType.toUpperCase()}</span>
-            <div className="flex items-center gap-3">
-              <span className="text-gray-400 font-normal">
-                {Object.keys(metadata.frame_metadata).length} attrs
-              </span>
-              <button
-                type="button"
-                onClick={() => setShowMetadata(false)}
-                className="px-2 py-0.5 bg-gray-700 hover:bg-gray-600 rounded border border-gray-500"
-                title="Close metadata panel"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-          <div className="px-3 py-2 border-b border-gray-700 bg-gray-900/60">
-            <div className="text-gray-400 uppercase tracking-wide text-[10px] mb-1">Viewer Info</div>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono">
-              <div className="flex justify-between border-b border-gray-800/50 py-0.5">
-                <span className="text-gray-300 truncate pr-2">resolution</span>
-                <span className="text-right shrink-0">{metadata.width}×{metadata.height}</span>
-              </div>
-              <div className="flex justify-between border-b border-gray-800/50 py-0.5">
-                <span className="text-gray-300 truncate pr-2">frame_number</span>
-                <span className="text-right shrink-0">{metadata.frame_number}</span>
-              </div>
-              <div className="flex justify-between border-b border-gray-800/50 py-0.5">
-                <span className="text-gray-300 truncate pr-2">fps</span>
-                <span className="text-right shrink-0">{fps}</span>
-              </div>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 p-3 font-mono">
-            {Object.entries(metadata.frame_metadata).map(([k, v]) => (
-              <div key={k} className="flex justify-between border-b border-gray-800/50 py-0.5">
-                <span className="text-gray-300 truncate pr-2">{k}</span>
-                <span className="text-right shrink-0">{v}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <MetadataOverlay
+          streamType={streamType}
+          metadata={metadata}
+          fps={fps}
+          onClose={() => setShowMetadata(false)}
+        />
       )}
 
       {/* Placeholder when not streaming */}
@@ -646,6 +608,62 @@ function IMUStreamTile({ streamType, isStreaming, showDeviceName, deviceName, se
             </div>
           </>
         )}
+      </div>
+    </div>
+  )
+}
+
+interface MetadataOverlayProps {
+  streamType: string
+  metadata: StreamMetadata
+  fps: number
+  onClose: () => void
+}
+
+function MetadataOverlay({ streamType, metadata, fps, onClose }: MetadataOverlayProps) {
+  const frameMd = metadata.frame_metadata ?? {}
+  return (
+    <div className="absolute inset-0 overflow-y-auto bg-black/90 text-white text-xs z-10">
+      <div className="sticky top-0 px-3 py-2 bg-gray-800 font-semibold border-b border-gray-700 flex items-center justify-between">
+        <span>Frame Metadata — {streamType.toUpperCase()}</span>
+        <div className="flex items-center gap-3">
+          <span className="text-gray-400 font-normal">
+            {Object.keys(frameMd).length} attrs
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-2 py-0.5 bg-gray-700 hover:bg-gray-600 rounded border border-gray-500"
+            title="Close metadata panel"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+      <div className="px-3 py-2 border-b border-gray-700 bg-gray-900/60">
+        <div className="text-gray-400 uppercase tracking-wide text-[10px] mb-1">Viewer Info</div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono">
+          <div className="flex justify-between border-b border-gray-800/50 py-0.5">
+            <span className="text-gray-300 truncate pr-2">resolution</span>
+            <span className="text-right shrink-0">{metadata.width}×{metadata.height}</span>
+          </div>
+          <div className="flex justify-between border-b border-gray-800/50 py-0.5">
+            <span className="text-gray-300 truncate pr-2">frame_number</span>
+            <span className="text-right shrink-0">{metadata.frame_number}</span>
+          </div>
+          <div className="flex justify-between border-b border-gray-800/50 py-0.5">
+            <span className="text-gray-300 truncate pr-2">fps</span>
+            <span className="text-right shrink-0">{fps}</span>
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 p-3 font-mono">
+        {Object.entries(frameMd).map(([k, v]) => (
+          <div key={k} className="flex justify-between border-b border-gray-800/50 py-0.5">
+            <span className="text-gray-300 truncate pr-2">{k}</span>
+            <span className="text-right shrink-0">{v}</span>
+          </div>
+        ))}
       </div>
     </div>
   )
