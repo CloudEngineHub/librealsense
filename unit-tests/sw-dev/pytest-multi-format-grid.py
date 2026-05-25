@@ -3,7 +3,6 @@
 
 import pytest
 import pyrealsense2 as rs
-from pytest_check import check
 import numpy as np
 import cv2
 import logging
@@ -14,7 +13,9 @@ log = logging.getLogger(__name__)
 pytestmark = [pytest.mark.timeout(30)]
 
 W, H = 640, 480
-TOL_MEAN = 30   # cv2 and SDK YUV->RGB differ by ~25 even when both correct
+# average per-channel pixel diff between SDK and cv2 outputs on the same input.
+# tested 0.77, choosing a low tolerance intentionally to note when a change happens
+TOL_MEAN = 1
 
 _FOUR_TWO_TWO = {rs.format.yuyv, rs.format.uyvy}
 
@@ -40,19 +41,13 @@ def cv2_decode_nv12(raw):
 
 def cv2_decode_m420(raw):
     """cv2 has no native M420 decoder. Rearrange M420 (2 Y rows + 1 UV row, repeating)
-    into NV12 byte order (Y plane then UV rows), then use cv2's NV12 decoder."""
+    into NV12 byte order (Y plane then UV rows), then use cv2's NV12 decoder.
+    SDK's m420_parse_one_line in src/proc/color-formats-converter.cpp interleaves UV
+    as `u0 v0 u2 v2 ...` — same order NV12 expects, so reshape alone is sufficient."""
     blocks = raw.reshape(H // 2, 3, W)
     y_plane = blocks[:, :2, :].reshape(H, W)
     uv_rows = blocks[:, 2, :]
     return cv2.cvtColor(np.vstack([y_plane, uv_rows]), cv2.COLOR_YUV2RGB_NV12)
-
-
-CASES = [
-    (rs.format.yuyv, rs.yuy_decoder,  cv2_decode_yuyv),
-    (rs.format.uyvy, rs.uyvy_decoder, cv2_decode_uyvy),
-    (rs.format.nv12, rs.nv12_decoder, cv2_decode_nv12),
-    (rs.format.m420, rs.m420_decoder, cv2_decode_m420),
-]
 
 
 def sdk_decode(raw, fmt, decoder_cls):
@@ -62,25 +57,27 @@ def sdk_decode(raw, fmt, decoder_cls):
         stream = s.video_stream("Color", rs.stream.color, fmt, bpp)
         s.start(stream)
         f = stream.frame()
+        # stream.frame() default-fills f.pixels with a dummy buffer sized for the
+        # stream's declared bpp; we replace it with our own raw bytes before publish.
         f.pixels = raw
         received = s.publish(f)
         return np.asanyarray(decoder_cls().process(received).get_data()).reshape(H, W, 3).copy()
 
 
-def test_sdk_vs_cv2_decoder():
+@pytest.mark.parametrize("fmt,decoder_cls,cv2_decode", [
+    (rs.format.yuyv, rs.yuy_decoder,  cv2_decode_yuyv),
+    (rs.format.uyvy, rs.uyvy_decoder, cv2_decode_uyvy),
+    (rs.format.nv12, rs.nv12_decoder, cv2_decode_nv12),
+    (rs.format.m420, rs.m420_decoder, cv2_decode_m420),
+], ids=["yuyv", "uyvy", "nv12", "m420"])
+def test_sdk_vs_cv2_decoder(fmt, decoder_cls, cv2_decode):
     """Same raw bytes -> SDK decoder vs cv2 decoder. Mean diff <= TOL_MEAN.
 
     cv2 and the SDK decode the same bytes; big pixel diff means SDK bug.
     """
-    rng = np.random.default_rng(0)
-    for fmt, decoder_cls, cv2_decode in CASES:
-        size, _ = fmt_layout(fmt)
-        raw = rng.integers(0, 256, size=size, dtype=np.uint8)
-        rgb_sdk = sdk_decode(raw, fmt, decoder_cls)
-        rgb_cv2 = cv2_decode(raw)
-        mean = float(np.abs(rgb_sdk.astype(int) - rgb_cv2.astype(int)).mean())
-        log.info(f"{fmt}: SDK vs cv2  mean |d|={mean:.2f}")
-        check.is_true(
-            mean <= TOL_MEAN,
-            msg=f"{fmt}: SDK decoder diverges from cv2 reference: mean |d|={mean:.2f} > {TOL_MEAN}"
-        )
+    raw = np.random.default_rng(0).integers(0, 256, size=fmt_layout(fmt)[0], dtype=np.uint8)
+    rgb_sdk = sdk_decode(raw, fmt, decoder_cls)
+    rgb_cv2 = cv2_decode(raw)
+    mean = float(np.abs(rgb_sdk.astype(int) - rgb_cv2.astype(int)).mean())
+    log.info(f"{fmt}: SDK vs cv2  mean |d|={mean:.2f}")
+    assert mean <= TOL_MEAN, f"{fmt}: SDK decoder diverges from cv2 reference: mean |d|={mean:.2f} > {TOL_MEAN}"
