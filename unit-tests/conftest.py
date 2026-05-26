@@ -231,6 +231,17 @@ def pytest_configure(config):
             config.option.repeat_scope = 'module'
             config._module_retry_mode = True    # skip retry passes when previous pass was clean
 
+    # We override pytest-repeat's `__pytest_repeat_step_number` to module scope so
+    # module-scoped fixtures (e.g. module_device_setup) can depend on it and re-instantiate
+    # per repeat pass.  That override only makes sense in module-scope repetition.  If a
+    # user runs `--count N` *directly* with the default function-scope, force module scope
+    # to stay consistent with the override.  --repeat / --retries already set this above.
+    if config.getoption('count', default=1) > 1 and config.getoption('repeat_scope', default='function') == 'function':
+        log.warning("--count > 1 with default function-scope conflicts with our module-scoped "
+                    "__pytest_repeat_step_number override; forcing --repeat-scope=module. "
+                    "Use --repeat N for the module-scoped alias.")
+        config.option.repeat_scope = 'module'
+
     # Parse and store context
     context_str = config.getoption("--context", default="")
     if context_str:
@@ -467,10 +478,17 @@ def session_setup_teardown():
 
 @pytest.fixture(scope="module")
 def _test_device_serial(request):
-    """Receives the device serial injected by pytest_generate_tests parametrization.
+    """Receives the device-selection value injected by ``pytest_generate_tests``.
 
-    Returns None when the test has no single-spec device/device_each markers
-    (e.g. multi-device tests, or tests with no device markers at all).
+    Possible values (set in ``resolve_device_each_serials``):
+
+    - ``None``                    — no parametrization (test has no device markers).
+    - ``str`` (plain serial)      — single-spec ``device(...)`` or ``device_each(...)``
+                                    resolved to one device.
+    - ``str`` (sentinel)          — ``__SKIP__:<pattern>`` or ``__MISSING__:<pattern>``
+                                    when the lab had no usable match.
+    - ``list[str]``               — multi-spec ``device("A", "B")`` resolved to a list
+                                    of unique serials.
     """
     return getattr(request, 'param', None)
 
@@ -481,9 +499,9 @@ def __pytest_repeat_step_number(request):
     consumers (e.g. module_device_setup) can depend on it and pytest re-instantiates
     them on each repeat pass — driving the device recycle between passes.
 
-    pytest-repeat parametrizes this with scope='module' (set via repeat_scope), so
-    indirect values arrive via request.param. Without parametrize (--count==1)
-    we just return 0.
+    Assumes ``repeat_scope='module'`` (forced in ``pytest_configure`` whenever
+    ``--count`` / ``--repeat`` / ``--retries`` ask for >1 pass).  Without parametrize
+    (--count==1) ``request.param`` is unset and we just return 0.
     """
     return getattr(request, 'param', 0)
 
@@ -518,7 +536,10 @@ def module_device_setup(request, _test_device_serial, __pytest_repeat_step_numbe
     if isinstance(serial_number, list):
         # Multi-device path: parametrized list of serials. Sentinels are always strings,
         # so the list form never carries skip/missing semantics.
-        names = [f"{devices.get(sn).name} [{sn}]" for sn in serial_number]
+        names = [
+            f"{(devices.get(sn).name if devices.get(sn) else sn)} [{sn}]"
+            for sn in serial_number
+        ]
         log.info(f"Configuration: {', '.join(names)}")
         try:
             devices.enable_only(serial_number, recycle=True)

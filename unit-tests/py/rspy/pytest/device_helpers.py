@@ -145,8 +145,10 @@ def resolve_device_each_serials(metafunc):
     at *module* scope, so module-scoped fixtures (``module_device_setup``, ``test_context``,
     ``test_device``) are reused across all test functions sharing the same device.
 
-    - ``device_each(pattern)``: one instance per matching device (optional — no instance
-      if no device matches).
+    - ``device_each(pattern)``: one instance per matching device.  When no device
+      matches (and there is no coexisting single-spec ``device()``), a single
+      ``__SKIP__:patterns`` sentinel instance is parametrized so the test is
+      collected and skipped by ``module_device_setup``.
     - ``device(pattern)`` (single-spec form): exactly one instance using the first matching
       device.  If no device matches, a ``__MISSING__:pattern`` sentinel is added so that
       the test still runs and ``module_device_setup`` can call pytest.fail() for it.
