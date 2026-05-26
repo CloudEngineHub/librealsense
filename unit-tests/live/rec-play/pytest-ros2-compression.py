@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 pytestmark = [
     pytest.mark.device("D400*"),
     pytest.mark.device_each("D500*"),
+    pytest.mark.device_exclude("D555"), # D555 (DDS) records an empty bag for compressed recording. Tracked in RSDEV-11513
 ]
 
 W, H, BPP = 640, 480, 2
@@ -182,9 +183,6 @@ def _record_live_bag(filename, dev):
         if p.is_default() and p.stream_type() == rs.stream.depth
     )
 
-    # Recorder must be created before the sensor starts streaming.
-    # Calling after start leads to race condition that might produce an empty bag file.
-    # Will crash when trying to open playback with "null pointer passed for argument 'profiles'"
     recorder = rs.recorder(filename, dev, True)  # force compression
 
     frame_queue = rs.frame_queue(100)
