@@ -595,6 +595,28 @@ def test_device(test_context):
     return dev, test_context
 
 
+@pytest.fixture
+def new_test_device(test_context):
+    """Function-scoped: re-query the module-scoped ``test_context`` and return a
+    *fresh* device wrapper for the first visible device.  Use this in tests that
+    mutate persistent device state (e.g. HDR sequencer overrides in
+    ``pytest-hdr-long.py``) and need each test to start from a new device object,
+    even though the underlying ``rs.context()`` is shared across the module.
+
+    Reuses the module-scoped context — no extra context construction cost.  Pair
+    with ``test_context`` if the test also needs the context (e.g. to build an
+    ``rs.pipeline(ctx)``).
+    """
+    devices_list = list(test_context.devices)
+    if not devices_list:
+        pytest.fail("No device available for test")
+
+    dev = devices_list[0]
+    log.debug(f"Test using fresh device handle: " f"{dev.get_info(rs.camera_info.name) if dev.supports(rs.camera_info.name) else 'Unknown'}")
+
+    return dev
+
+
 @pytest.fixture(scope="module")
 def test_devices(test_context, module_device_setup):
     """Return (device_list, context) for multi-device tests.
