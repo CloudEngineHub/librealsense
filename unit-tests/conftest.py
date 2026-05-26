@@ -621,7 +621,7 @@ def test_device(test_context):
 
 
 @pytest.fixture
-def new_test_device(test_context):
+def function_scoped_device(test_context):
     """Function-scoped: re-query the module-scoped ``test_context`` and return a
     *fresh* device wrapper for the first visible device.  Use this in tests that
     mutate persistent device state (e.g. HDR sequencer overrides in
