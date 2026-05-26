@@ -478,6 +478,13 @@ def test_wrapper_( test, configuration=None, repetition=1, curr_retry=0, max_ret
     opts = []
     if rslog:
         opts.append( '--rslog' )
+    # custom_fw_d400_override comes from the FW-compat gate below: when the bundled FW
+    # (or the user-supplied --custom-fw-d400) is below the device's minimum supported FW,
+    # the gate swaps in a per-device fallback image (e.g. D436 -> Signed_Image_UVC_5_17_3_7.bin)
+    # so test-fw-update can still exercise the flash path. The override wins over
+    # --custom-fw-d400. Only D400 has both a populated min-FW map and a fallback entry today;
+    # adding D555/D585S would require a D5xx override of get_firmware_min_version() and a
+    # parallel --custom-fw-d555 override pipe.
     effective_custom_fw_d400 = custom_fw_d400_override or custom_fw_path
     if test.name == "test-fw-update" and effective_custom_fw_d400:
         opts.append('--custom-fw-d400')
