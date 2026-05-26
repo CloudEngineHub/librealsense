@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo, type ReactNode } from 'react'
 import { useAppStore } from '../store'
 import { WebRTCHandler } from '../api/webrtc'
 import { apiClient } from '../api/client'
@@ -102,6 +102,7 @@ export function StreamViewer() {
                   showDeviceName={activeDeviceCount > 1}
                   deviceName={stream.deviceName}
                   serialNumber={stream.serialNumber}
+                  metadata={stream.metadata}
                 />
               )
             }
@@ -143,13 +144,6 @@ function StreamTile({ deviceId, deviceName, serialNumber, streamType, isStreamin
   const [connectionState, setConnectionState] = useState<RTCPeerConnectionState | null>(null)
   const [fps, setFps] = useState(0)
   const [showMetadata, setShowMetadata] = useState(false)
-
-  // Auto-close metadata panel when stream stops so the next session starts clean.
-  useEffect(() => {
-    if (!isStreaming) {
-      setShowMetadata(false)
-    }
-  }, [isStreaming]) // re-run only on streaming state changes
   const lastFrameTime = useRef(0)
   const frameCount = useRef(0)
   const [hoverDepth, setHoverDepth] = useState<{
@@ -191,7 +185,7 @@ function StreamTile({ deviceId, deviceName, serialNumber, streamType, isStreamin
       frameCount.current++
       const now = Date.now()
       if (now - lastFrameTime.current >= 1000) {
-        setFps(frameCount.current)
+        setFps(+(frameCount.current * 1000 / (now - lastFrameTime.current)).toFixed(2))
         frameCount.current = 0
         lastFrameTime.current = now
       }
@@ -215,7 +209,7 @@ function StreamTile({ deviceId, deviceName, serialNumber, streamType, isStreamin
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!isDepthStream || !isStreaming || !containerRef.current || !metadata) return
+      if (!isDepthStream || !isStreaming || showMetadata || !containerRef.current || !metadata) return
 
       const rect = containerRef.current.getBoundingClientRect()
       const mouseX = e.clientX - rect.left
@@ -268,7 +262,7 @@ function StreamTile({ deviceId, deviceName, serialNumber, streamType, isStreamin
         console.error('Error getting depth at pixel:', error)
       })
     },
-    [isDepthStream, isStreaming, deviceId, metadata]
+    [isDepthStream, isStreaming, showMetadata, deviceId, metadata]
   )
 
   const handleMouseLeave = useCallback(() => {
@@ -384,26 +378,15 @@ function StreamTile({ deviceId, deviceName, serialNumber, streamType, isStreamin
         </div>
       )}
 
-      {/* Metadata toggle button (hidden when panel is open) */}
-      {isStreaming && !showMetadata && metadata?.frame_metadata && Object.keys(metadata.frame_metadata).length > 0 && (
-        <button
-          type="button"
-          onClick={() => setShowMetadata(true)}
-          className={`absolute ${showDeviceName ? 'top-7' : 'top-2'} right-2 px-2 py-1 bg-black/60 hover:bg-black/80 rounded text-xs text-white border border-gray-600`}
-          title="Show frame metadata"
-        >
-          MD
-        </button>
-      )}
-
-      {isStreaming && showMetadata && metadata?.frame_metadata && (
-        <MetadataOverlay
-          streamType={streamType}
-          metadata={metadata}
-          fps={fps}
-          onClose={() => setShowMetadata(false)}
-        />
-      )}
+      <MetadataPanel
+        isStreaming={isStreaming}
+        metadata={metadata}
+        streamType={streamType}
+        fps={fps}
+        show={showMetadata}
+        onToggle={setShowMetadata}
+        buttonClassName={`absolute ${showDeviceName ? 'top-7' : 'top-2'} right-2 py-1`}
+      />
 
       {/* Placeholder when not streaming */}
       {!isStreaming && (
@@ -463,10 +446,27 @@ interface IMUStreamTileProps {
   showDeviceName?: boolean
   deviceName: string
   serialNumber: string
+  metadata?: StreamMetadata
 }
 
-function IMUStreamTile({ streamType, isStreaming, showDeviceName, deviceName, serialNumber }: IMUStreamTileProps) {
+function IMUStreamTile({ streamType, isStreaming, showDeviceName, deviceName, serialNumber, metadata }: IMUStreamTileProps) {
   const { imuHistory } = useAppStore()
+  const [fps, setFps] = useState(0)
+  const [showMetadata, setShowMetadata] = useState(false)
+  const lastFrameTime = useRef(0)
+  const frameCount = useRef(0)
+
+  useEffect(() => {
+    if (metadata?.frame_number !== undefined) {
+      frameCount.current++
+      const now = Date.now()
+      if (now - lastFrameTime.current >= 1000) {
+        setFps(+(frameCount.current * 1000 / (now - lastFrameTime.current)).toFixed(2))
+        frameCount.current = 0
+        lastFrameTime.current = now
+      }
+    }
+  }, [metadata?.frame_number])
   
   const isGyro = streamType.toLowerCase() === 'gyro'
   const isAccel = streamType.toLowerCase() === 'accel'
@@ -507,7 +507,17 @@ function IMUStreamTile({ streamType, isStreaming, showDeviceName, deviceName, se
             <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
           )}
         </div>
-        <span className="text-xs text-gray-400">{unit}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-400">{unit}</span>
+          <MetadataPanel
+            isStreaming={isStreaming}
+            metadata={metadata}
+            streamType={streamType}
+            fps={fps}
+            show={showMetadata}
+            onToggle={setShowMetadata}
+          />
+        </div>
       </div>
       
       {showDeviceName && (
@@ -617,54 +627,77 @@ interface MetadataOverlayProps {
   streamType: string
   metadata: StreamMetadata
   fps: number
-  onClose: () => void
 }
 
-function MetadataOverlay({ streamType, metadata, fps, onClose }: MetadataOverlayProps) {
+function MetadataOverlay({ streamType, metadata, fps }: MetadataOverlayProps) {
   const frameMd = metadata.frame_metadata ?? {}
+  const isMotion = ['gyro', 'accel', 'motion'].includes(streamType.toLowerCase())
   return (
-    <div className="absolute inset-0 overflow-y-auto bg-black/90 text-white text-xs z-10">
-      <div className="sticky top-0 px-3 py-2 bg-gray-800 font-semibold border-b border-gray-700 flex items-center justify-between">
-        <span>Frame Metadata — {streamType.toUpperCase()}</span>
-        <div className="flex items-center gap-3">
-          <span className="text-gray-400 font-normal">
-            {Object.keys(frameMd).length} attrs
-          </span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-2 py-0.5 bg-gray-700 hover:bg-gray-600 rounded border border-gray-500"
-            title="Close metadata panel"
-          >
-            ✕
-          </button>
-        </div>
+    <div className="absolute inset-0 overflow-y-auto bg-black/60 text-white text-xs z-10">
+      <div className="sticky top-0 px-3 py-2 bg-gray-800 font-semibold border-b border-gray-700">
+        Frame Metadata — {streamType.toUpperCase()}
       </div>
       <div className="px-3 py-2 border-b border-gray-700 bg-gray-900/60">
         <div className="text-gray-400 uppercase tracking-wide text-[10px] mb-1">Viewer Info</div>
         <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono">
-          <div className="flex justify-between border-b border-gray-800/50 py-0.5">
-            <span className="text-gray-300 truncate pr-2">resolution</span>
-            <span className="text-right shrink-0">{metadata.width}×{metadata.height}</span>
-          </div>
-          <div className="flex justify-between border-b border-gray-800/50 py-0.5">
-            <span className="text-gray-300 truncate pr-2">frame_number</span>
-            <span className="text-right shrink-0">{metadata.frame_number}</span>
-          </div>
-          <div className="flex justify-between border-b border-gray-800/50 py-0.5">
-            <span className="text-gray-300 truncate pr-2">fps</span>
-            <span className="text-right shrink-0">{fps}</span>
-          </div>
+          <MetadataItem label="frame_timestamp" value={metadata.timestamp} />
+          <MetadataItem label="clock_domain" value={metadata.clock_domain} />
+          <MetadataItem label="frame_number" value={metadata.frame_number} />
+          <MetadataItem label="pixel_format" value={metadata.pixel_format} />
+          <MetadataItem label="hardware_size" value={!isMotion ? resolutionFrom(metadata.hardware_width, metadata.hardware_height) : undefined} />
+          <MetadataItem label="display_size" value={!isMotion ? resolutionFrom(metadata.width, metadata.height) : undefined} />
+          <MetadataItem label="hardware_fps" value={metadata.hardware_fps} />
+          <MetadataItem label="viewer_fps" value={fps} />
         </div>
       </div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 p-3 font-mono">
         {Object.entries(frameMd).map(([k, v]) => (
-          <div key={k} className="flex justify-between border-b border-gray-800/50 py-0.5">
-            <span className="text-gray-300 truncate pr-2">{k}</span>
-            <span className="text-right shrink-0">{v}</span>
-          </div>
+          <MetadataItem key={k} label={k} value={v} />
         ))}
       </div>
+    </div>
+  )
+}
+
+function resolutionFrom(w: number | undefined, h: number | undefined): string | undefined {
+  return w !== undefined && h !== undefined ? `${w}×${h}` : undefined
+}
+
+interface MetadataPanelProps {
+  isStreaming: boolean
+  metadata?: StreamMetadata
+  streamType: string
+  fps: number
+  show: boolean
+  onToggle: (show: boolean) => void
+  buttonClassName?: string
+}
+
+function MetadataPanel({ isStreaming, metadata, streamType, fps, show, onToggle, buttonClassName = '' }: MetadataPanelProps) {
+  useEffect(() => { if (!isStreaming) onToggle(false) }, [isStreaming, onToggle])
+  const hasMetadata = isStreaming && !!metadata?.frame_metadata && Object.keys(metadata.frame_metadata).length > 0
+  if (!hasMetadata) return null
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => onToggle(!show)}
+        title={show ? 'Hide frame metadata' : 'Show frame metadata'}
+        className={`px-2 py-0.5 bg-black/60 hover:bg-black/80 rounded text-xs text-white border border-gray-600 z-20 ${buttonClassName}`}
+      >
+        {show ? '✕' : 'Metadata'}
+      </button>
+      {show && <MetadataOverlay streamType={streamType} metadata={metadata!} fps={fps} />}
+    </>
+  )
+}
+
+function MetadataItem({ label, value }: { label: string; value: ReactNode }) {
+  if (value === undefined || value === null) return null
+  return (
+    <div className="flex justify-between border-b border-gray-800/50 py-0.5">
+      <span className="text-gray-300 truncate pr-2">{label}</span>
+      <span className="text-right shrink-0">{value}</span>
     </div>
   )
 }

@@ -1009,6 +1009,7 @@ class RealSenseManager:
                     self.pipeline_signatures.pop(device_id, None)
                     self.frame_queues.pop(device_id, None)
                     self.metadata_queues.pop(device_id, None)
+                    self._supported_md_by_profile.clear()
                     self.stopping.discard(device_id)
                     # Reset streaming mode to idle
                     self.streaming_mode[device_id] = "idle"
@@ -1186,6 +1187,32 @@ class RealSenseManager:
     # use older pybind11 where the enum is not iterable.
     _FRAME_METADATA_VALUES = list(rs.frame_metadata_value.__members__.values())
 
+    @staticmethod
+    def _build_viewer_info(frame_data) -> Dict[str, Any]:
+        """Top metadata block, mirrors C++ realsense-viewer."""
+        profile = frame_data.get_profile()
+        actual_fps_key = rs.frame_metadata_value.actual_fps
+        info: Dict[str, Any] = {
+            "timestamp": frame_data.get_timestamp(),
+            "frame_number": frame_data.get_frame_number(),
+            "clock_domain": frame_data.get_frame_timestamp_domain().name,
+            "pixel_format": profile.format().name,
+            "hardware_fps": (
+                frame_data.get_frame_metadata(actual_fps_key) / 1000.0
+                if frame_data.supports_frame_metadata(actual_fps_key)
+                else profile.fps()
+            ),
+        }
+        try:  # video frames only; motion frames have no width/height
+            info["width"] = frame_data.get_width()
+            info["height"] = frame_data.get_height()
+            vsp = profile.as_video_stream_profile()
+            info["hardware_width"] = vsp.width()
+            info["hardware_height"] = vsp.height()
+        except Exception:
+            pass
+        return info
+
     def _get_frame_metadata(self, frame_data) -> Dict[str, int]:
         """Return all rs2_frame_metadata_value attributes the frame supports.
         Mirrors common/stream-model.cpp:52-59 in the C++ realsense-viewer.
@@ -1308,11 +1335,8 @@ class RealSenseManager:
 
                             # Add metadata
                             metadata = {
-                                "timestamp": frame_data.get_timestamp(),
-                                "frame_number": frame_data.get_frame_number(),
-                                "width": getattr(frame_data, "get_width", lambda: 640)() or 640,
-                                "height": getattr(frame_data, "get_height", lambda: 480)() or 480,
                                 "frame_metadata": self._get_frame_metadata(frame_data),
+                                **self._build_viewer_info(frame_data),
                             }
 
                             if rs_stream == rs.stream.gyro or rs_stream == rs.stream.accel:
@@ -1374,6 +1398,7 @@ class RealSenseManager:
                             del self.metadata_queues[device_id]
                         if device_id in self.depth_frames:
                             del self.depth_frames[device_id]
+                        self._supported_md_by_profile.clear()
                         if device_id in self.device_infos:
                             self.device_infos[device_id].is_streaming = False
             except Exception:
@@ -1612,9 +1637,8 @@ class RealSenseManager:
     ) -> Tuple[Optional[Any], dict]:
         """Process a single sensor frame; return (processed_frame, metadata)."""
         processed_frame = None
+        info_source = frame  # frame to read info from after post processing is done
         metadata: dict = {
-            "timestamp": frame.get_timestamp(),
-            "frame_number": frame.get_frame_number(),
             "frame_metadata": self._get_frame_metadata(frame),
         }
 
@@ -1624,20 +1648,17 @@ class RealSenseManager:
             self.depth_frames[device_id] = depth_frame
             colorized = colorizer.colorize(depth_frame)
             processed_frame = np.asanyarray(colorized.get_data())
-            metadata["width"] = depth_frame.get_width()
-            metadata["height"] = depth_frame.get_height()
+            info_source = depth_frame
 
         elif "color" in frame_stream_name:
             color_frame = frame.as_video_frame()
             color_frame = self._apply_color_filters(device_id, color_frame)
             processed_frame = np.asanyarray(color_frame.get_data())
-            metadata["width"] = color_frame.get_width()
-            metadata["height"] = color_frame.get_height()
+            info_source = color_frame
 
         elif "infrared" in frame_stream_name:
             processed_frame = np.asanyarray(frame.get_data())
-            metadata["width"] = frame.as_video_frame().get_width()
-            metadata["height"] = frame.as_video_frame().get_height()
+            info_source = frame.as_video_frame()
 
         elif "gyro" in frame_stream_name or "accel" in frame_stream_name:
             motion_frame = frame.as_motion_frame()
@@ -1654,9 +1675,8 @@ class RealSenseManager:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 255, 100), 1)
             cv2.putText(processed_frame, f"Z: {motion_data.z:.3f}", (10, 90),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 100, 255), 1)
-            metadata["width"] = 320
-            metadata["height"] = 120
 
+        metadata.update(self._build_viewer_info(info_source))
         return processed_frame, metadata
 
     def _collect_sensor_frames(
