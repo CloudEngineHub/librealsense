@@ -402,8 +402,12 @@ def pytest_runtest_makereport(item, call):
         ensure_newline()
         log.debug(f"Test execution took {report.duration:.3f}s")
 
-    # Record module-level failure for --retries skip-if-clean logic
-    if report.when == "call" and report.failed and getattr(item.config, '_module_retry_mode', False):
+    # Record module-level failure for --retries skip-if-clean logic.
+    # Track ANY phase (setup / call / teardown) — a setup-phase failure shows up as
+    # ERROR in Jenkins reports but is just as much a failure for retry purposes.
+    # Restricting to report.when == "call" was missing every fixture-time error and
+    # caused the retry pass to be wrongly skipped (see Jenkins #113344).
+    if report.failed and getattr(item.config, '_module_retry_mode', False):
         callspec = getattr(item, 'callspec', None)
         step = callspec.params.get('__pytest_repeat_step_number', 0) if callspec else 0
         mod = item.module.__file__
