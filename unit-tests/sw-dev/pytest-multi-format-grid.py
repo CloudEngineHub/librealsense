@@ -10,74 +10,80 @@ import logging
 import sw_device as sw
 
 log = logging.getLogger(__name__)
-pytestmark = [pytest.mark.timeout(30)]
+pytestmark = [pytest.mark.timeout(60)]
 
 W, H = 640, 480
 # average per-channel pixel diff between SDK and cv2 outputs on the same input.
-# tested 0.77, choosing a low tolerance intentionally to note when a change happens
+# observed ~0.58-0.77; tight tolerance to flag any change.
 TOL_MEAN = 1
 
 _FOUR_TWO_TWO = {rs.format.yuyv, rs.format.uyvy}
+_WITH_ALPHA  = {rs.format.rgba8, rs.format.bgra8}
+
+_CONVERTERS = {
+    rs.format.yuyv: rs.yuy2_converter,
+    rs.format.uyvy: rs.uyvy_converter,
+    rs.format.nv12: rs.nv12_converter,
+    rs.format.m420: rs.m420_converter,
+}
 
 
-def fmt_layout(fmt):
-    """Return (total_bytes, bpp) for one frame in `fmt` at W x H."""
-    if fmt in _FOUR_TWO_TWO:
-        return W * H * 2, 2
-    return W * H * 3 // 2, 1
-
-
-def cv2_decode_yuyv(raw):
-    return cv2.cvtColor(raw.reshape(H, W, 2), cv2.COLOR_YUV2RGB_YUYV)
-
-
-def cv2_decode_uyvy(raw):
-    return cv2.cvtColor(raw.reshape(H, W, 2), cv2.COLOR_YUV2RGB_UYVY)
-
-
-def cv2_decode_nv12(raw):
-    return cv2.cvtColor(raw.reshape(H * 3 // 2, W), cv2.COLOR_YUV2RGB_NV12)
-
-
-def cv2_decode_m420(raw):
-    """cv2 has no native M420 decoder. Rearrange M420 (2 Y rows + 1 UV row, repeating)
-    into NV12 byte order (Y plane then UV rows), then use cv2's NV12 decoder.
-    SDK's m420_parse_one_line in src/proc/color-formats-converter.cpp interleaves UV
-    as `u0 v0 u2 v2 ...` — same order NV12 expects, so reshape alone is sufficient."""
+def _decode_to_rgb(raw, in_fmt):
+    if in_fmt == rs.format.yuyv:
+        return cv2.cvtColor(raw.reshape(H, W, 2), cv2.COLOR_YUV2RGB_YUYV)
+    if in_fmt == rs.format.uyvy:
+        return cv2.cvtColor(raw.reshape(H, W, 2), cv2.COLOR_YUV2RGB_UYVY)
+    if in_fmt == rs.format.nv12:
+        return cv2.cvtColor(raw.reshape(H * 3 // 2, W), cv2.COLOR_YUV2RGB_NV12)
+    # M420: rearrange (2 Y rows + 1 UV row) -> NV12 layout, then cv2 NV12. SDK's
+    # m420_parse_one_line interleaves UV as `u0 v0 u2 v2 ...` — same as NV12.
     blocks = raw.reshape(H // 2, 3, W)
-    y_plane = blocks[:, :2, :].reshape(H, W)
-    uv_rows = blocks[:, 2, :]
-    return cv2.cvtColor(np.vstack([y_plane, uv_rows]), cv2.COLOR_YUV2RGB_NV12)
+    nv12 = np.vstack([blocks[:, :2, :].reshape(H, W), blocks[:, 2, :]])
+    return cv2.cvtColor(nv12, cv2.COLOR_YUV2RGB_NV12)
 
 
-def sdk_decode(raw, fmt, decoder_cls):
-    """Inject `raw` through sw_device, run SDK decoder, return RGB."""
-    _, bpp = fmt_layout(fmt)
+def cv2_convert(raw, in_fmt, out_fmt):
+    rgb = _decode_to_rgb(raw, in_fmt)
+    if out_fmt == rs.format.rgb8:
+        return rgb
+    if out_fmt == rs.format.bgr8:
+        return rgb[..., ::-1]
+    alpha = np.full(rgb.shape[:2] + (1,), 255, dtype=np.uint8)
+    if out_fmt == rs.format.rgba8:
+        return np.concatenate([rgb, alpha], axis=-1)
+    if out_fmt == rs.format.bgra8:
+        return np.concatenate([rgb[..., ::-1], alpha], axis=-1)
+    raise ValueError(f"unsupported output format {out_fmt}")
+
+
+def sdk_convert(raw, in_fmt, out_fmt):
+    """Inject `raw` (in_fmt wire bytes) through sw_device, run the SDK's converter
+    for in_fmt -> out_fmt, return decoded RGB/BGR(A) array."""
+    bpp = 2 if in_fmt in _FOUR_TWO_TWO else 1
+    channels = 4 if out_fmt in _WITH_ALPHA else 3
     with sw.sensor("test") as s:
-        stream = s.video_stream("Color", rs.stream.color, fmt, bpp)
+        stream = s.video_stream("Color", rs.stream.color, in_fmt, bpp)
         s.start(stream)
         f = stream.frame()
-        # stream.frame() default-fills f.pixels with a dummy buffer sized for the
-        # stream's declared bpp; we replace it with our own raw bytes before publish.
         f.pixels = raw
         received = s.publish(f)
-        return np.asanyarray(decoder_cls().process(received).get_data()).reshape(H, W, 3).copy()
+        out_frame = _CONVERTERS[in_fmt](out_fmt).process(received)
+        return np.asanyarray(out_frame.get_data()).reshape(H, W, channels).copy()
 
 
-@pytest.mark.parametrize("fmt,decoder_cls,cv2_decode", [
-    (rs.format.yuyv, rs.yuy_decoder,  cv2_decode_yuyv),
-    (rs.format.uyvy, rs.uyvy_decoder, cv2_decode_uyvy),
-    (rs.format.nv12, rs.nv12_decoder, cv2_decode_nv12),
-    (rs.format.m420, rs.m420_decoder, cv2_decode_m420),
-], ids=["yuyv", "uyvy", "nv12", "m420"])
-def test_sdk_vs_cv2_decoder(fmt, decoder_cls, cv2_decode):
-    """Same raw bytes -> SDK decoder vs cv2 decoder. Mean diff <= TOL_MEAN.
+INPUTS  = [rs.format.yuyv, rs.format.uyvy, rs.format.nv12, rs.format.m420]
+# Y8/Y16 can be added — SDK supports them from YUYV/NV12/M420 but not from UYVY.
+OUTPUTS = [rs.format.rgb8, rs.format.rgba8, rs.format.bgr8, rs.format.bgra8]
 
-    cv2 and the SDK decode the same bytes; big pixel diff means SDK bug.
-    """
-    raw = np.random.default_rng(0).integers(0, 256, size=fmt_layout(fmt)[0], dtype=np.uint8)
-    rgb_sdk = sdk_decode(raw, fmt, decoder_cls)
-    rgb_cv2 = cv2_decode(raw)
-    mean = float(np.abs(rgb_sdk.astype(int) - rgb_cv2.astype(int)).mean())
-    log.info(f"{fmt}: SDK vs cv2  mean |d|={mean:.2f}")
-    assert mean <= TOL_MEAN, f"{fmt}: SDK decoder diverges from cv2 reference: mean |d|={mean:.2f} > {TOL_MEAN}"
+@pytest.mark.parametrize("in_fmt",  INPUTS,  ids=[f.name for f in INPUTS])
+@pytest.mark.parametrize("out_fmt", OUTPUTS, ids=[f.name for f in OUTPUTS])
+def test_sdk_vs_cv2(in_fmt, out_fmt):
+    """SDK converter (in_fmt -> out_fmt) vs cv2 reference on the same raw bytes."""
+    size = W * H * 2 if in_fmt in _FOUR_TWO_TWO else W * H * 3 // 2
+    raw = np.random.default_rng(0).integers(0, 256, size=size, dtype=np.uint8)
+    sdk_out = sdk_convert(raw, in_fmt, out_fmt)
+    ref = cv2_convert(raw, in_fmt, out_fmt)
+    diff = np.subtract(sdk_out, ref, dtype=np.int16)
+    mean = np.abs(diff).mean()
+    log.info(f"{in_fmt} -> {out_fmt}  mean |d|={mean:.2f}")
+    assert mean <= TOL_MEAN, f"{in_fmt} -> {out_fmt} mean |d|={mean:.2f} > {TOL_MEAN}"
