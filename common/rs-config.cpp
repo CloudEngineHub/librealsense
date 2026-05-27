@@ -9,6 +9,7 @@
 #include <rsutils/json.h>
 #include <rsutils/json-config.h>
 #include <sstream>
+#include <rsutils/easylogging/easyloggingpp.h>
 
 using json = rsutils::json;
 
@@ -85,7 +86,7 @@ void config_file::save(const char* filename)
 
         if (!result)
         {
-            // save failed, perhaps add some logging here
+            LOG_ERROR("Failed to save config file '" + std::string(filename));
         }
     }
     catch (...)
