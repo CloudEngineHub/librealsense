@@ -1,26 +1,16 @@
-import { useRef, useMemo, useEffect } from 'react'
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { useMemo } from 'react'
+import { Canvas } from '@react-three/fiber'
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import * as THREE from 'three'
 import { useAppStore } from '../store'
 
 export function PointCloudViewer() {
-  const { pointCloudVertices, isPointCloudEnabled, togglePointCloud, isStreaming } = useAppStore()
+  const { pointCloudVertices, isStreaming } = useAppStore()
 
   return (
     <div className="h-full flex flex-col">
       {/* Controls */}
-      <div className="flex items-center gap-4 p-2 bg-gray-800 rounded-t-lg">
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={isPointCloudEnabled}
-            onChange={() => togglePointCloud()}
-            disabled={!isStreaming}
-            className="control-checkbox"
-          />
-          <span className="text-sm">Enable Point Cloud</span>
-        </label>
+      <div className="flex items-center justify-end gap-4 p-2 bg-gray-800 rounded-t-lg">
         <button
           onClick={() => {
             if (pointCloudVertices) {
@@ -36,10 +26,10 @@ export function PointCloudViewer() {
 
       {/* 3D Canvas */}
       <div className="flex-1 bg-black rounded-b-lg overflow-hidden">
-        {isPointCloudEnabled && pointCloudVertices ? (
+        {pointCloudVertices ? (
           <Canvas>
-            <PerspectiveCamera makeDefault position={[0, 0, 2]} />
-            <OrbitControls enablePan enableZoom enableRotate />
+            <PerspectiveCamera makeDefault position={[0, 0.3, 0.3]} />
+            <OrbitControls enablePan enableZoom enableRotate target={[0, 0, -1]} />
             <ambientLight intensity={0.5} />
             <PointCloud vertices={pointCloudVertices} />
             <Axes />
@@ -64,8 +54,8 @@ export function PointCloudViewer() {
               <p className="text-lg">3D Point Cloud View</p>
               <p className="text-sm mt-1">
                 {isStreaming
-                  ? 'Enable point cloud in controls above'
-                  : 'Start streaming and enable point cloud'}
+                  ? 'Waiting for point cloud data…'
+                  : 'Start streaming depth to see points'}
               </p>
             </div>
           </div>
@@ -80,61 +70,82 @@ interface PointCloudProps {
 }
 
 function PointCloud({ vertices }: PointCloudProps) {
-  const pointsRef = useRef<THREE.Points>(null)
-  const { camera } = useThree()
-
-  // Create geometry from vertices
   const geometry = useMemo(() => {
     const geo = new THREE.BufferGeometry()
-    
-    // Vertices array is [x1, y1, z1, x2, y2, z2, ...]
-    const positions = new Float32Array(vertices.length)
-    const colors = new Float32Array(vertices.length)
+    const n = vertices.length
+    const positions = new Float32Array(n)
+    const colors = new Float32Array(n)
+    const BINS = 64
 
-    for (let i = 0; i < vertices.length; i += 3) {
-      // Copy positions
+    let zMin = Infinity
+    let zMax = -Infinity
+    for (let i = 2; i < n; i += 3) {
+      const z = vertices[i]
+      if (z < zMin) zMin = z
+      if (z > zMax) zMax = z
+    }
+
+    // Histogram + CDF (matches rs.colorizer histogram_eq default) so a few far-z
+    // outliers don't crush the visible scene into a single color band.
+    const cdf = new Float32Array(BINS)
+    const binScale = isFinite(zMin) && zMax > zMin ? BINS / (zMax - zMin) : 0
+    if (binScale > 0) {
+      const hist = new Uint32Array(BINS)
+      for (let i = 2; i < n; i += 3) {
+        let bin = Math.floor((vertices[i] - zMin) * binScale)
+        if (bin >= BINS) bin = BINS - 1
+        else if (bin < 0) bin = 0
+        hist[bin]++
+      }
+      let acc = 0
+      for (let b = 0; b < BINS; b++) {
+        acc += hist[b]
+        cdf[b] = acc
+      }
+      if (acc > 0) for (let b = 0; b < BINS; b++) cdf[b] /= acc
+    }
+
+    for (let i = 0; i < n; i += 3) {
+      // RealSense: x-right, y-down, z-forward (meters)
+      // Three.js:  x-right, y-up,   z-toward-camera
       positions[i] = vertices[i]
-      positions[i + 1] = vertices[i + 1]
-      positions[i + 2] = vertices[i + 2]
+      positions[i + 1] = -vertices[i + 1]
+      positions[i + 2] = -vertices[i + 2]
 
-      // Color based on depth (Z value)
-      const z = vertices[i + 2]
-      const normalizedZ = Math.min(Math.max((z + 1) / 4, 0), 1) // Normalize depth to 0-1
-      
-      // Create a gradient from blue (near) to red (far)
-      colors[i] = normalizedZ // R
-      colors[i + 1] = 0.2 // G
-      colors[i + 2] = 1 - normalizedZ // B
+      let t = 0
+      if (binScale > 0) {
+        let bin = Math.floor((vertices[i + 2] - zMin) * binScale)
+        if (bin >= BINS) bin = BINS - 1
+        else if (bin < 0) bin = 0
+        t = cdf[bin]
+      }
+      const c = jetColor(t)
+      colors[i] = c[0]
+      colors[i + 1] = c[1]
+      colors[i + 2] = c[2]
     }
 
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
     geo.computeBoundingSphere()
-
     return geo
   }, [vertices])
 
-  // Center camera on point cloud
-  useEffect(() => {
-    if (geometry.boundingSphere) {
-      const center = geometry.boundingSphere.center
-      camera.lookAt(center)
-    }
-  }, [geometry, camera])
-
-  // Rotate slowly for effect
-  useFrame(() => {
-    if (pointsRef.current) {
-      // Optional: Add subtle rotation
-      // pointsRef.current.rotation.y += 0.001
-    }
-  })
-
   return (
-    <points ref={pointsRef} geometry={geometry}>
+    <points geometry={geometry}>
       <pointsMaterial size={0.005} vertexColors sizeAttenuation />
     </points>
   )
+}
+
+// Jet colormap (blue → cyan → green → yellow → red) — matches librealsense rs.colorizer default.
+function jetColor(t: number): [number, number, number] {
+  const v = Math.min(Math.max(t, 0), 1)
+  if (v < 0.125) return [0, 0, 0.5 + v * 4]
+  if (v < 0.375) return [0, (v - 0.125) * 4, 1]
+  if (v < 0.625) return [(v - 0.375) * 4, 1, 1 - (v - 0.375) * 4]
+  if (v < 0.875) return [1, 1 - (v - 0.625) * 4, 0]
+  return [1 - (v - 0.875) * 4, 0, 0]
 }
 
 function Axes() {

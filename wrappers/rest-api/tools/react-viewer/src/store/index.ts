@@ -1173,7 +1173,27 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   // UI state
   viewMode: '2d',
-  setViewMode: (mode) => set({ viewMode: mode }),
+  setViewMode: (mode) => {
+    const prev = get().viewMode
+    if (prev === mode) return
+    set({ viewMode: mode })
+
+    const activeDevices = Object.values(get().deviceStates).filter(ds => ds.isActive)
+    if (mode === '3d') {
+      for (const ds of activeDevices) {
+        apiClient
+          .enablePointCloud(ds.device.device_id)
+          .catch(err => console.error(`enablePointCloud(${ds.device.device_id}) failed:`, err))
+      }
+    } else {
+      for (const ds of activeDevices) {
+        apiClient
+          .disablePointCloud(ds.device.device_id)
+          .catch(err => console.error(`disablePointCloud(${ds.device.device_id}) failed:`, err))
+      }
+      set({ pointCloudVertices: null })
+    }
+  },
   isIMUViewerExpanded: false,
   toggleIMUViewer: () => set((state) => ({ isIMUViewerExpanded: !state.isIMUViewerExpanded })),
 

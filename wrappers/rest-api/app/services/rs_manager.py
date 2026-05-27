@@ -1820,6 +1820,7 @@ class RealSenseManager:
                                 v, t = points.get_vertices(), points.get_texture_coordinates()
                                 verts = np.asanyarray(v).view(np.float32).reshape(-1, 3)
                                 verts = verts[verts[:, 2] >= 0.03]  # Filter out z < 0.03
+                                verts = verts[::4]  # decimate to keep payload under Socket.IO buffer cap
                                 metadata["point_cloud"] = {"vertices": verts, "texture_coordinates": []}
 
                             # Store processed frame and metadata
@@ -2122,6 +2123,14 @@ class RealSenseManager:
             colorized = colorizer.colorize(depth_frame)
             processed_frame = np.asanyarray(colorized.get_data())
             info_source = depth_frame
+
+            if self.is_pointcloud_enabled.get(device_id, False):
+                points = self.pc.calculate(depth_frame)
+                if points:
+                    verts = np.asanyarray(points.get_vertices()).view(np.float32).reshape(-1, 3)
+                    verts = verts[verts[:, 2] >= 0.03]
+                    verts = verts[::4]  # decimate to keep payload under Socket.IO buffer cap
+                    metadata["point_cloud"] = {"vertices": verts, "texture_coordinates": []}
 
         elif "color" in frame_stream_name:
             color_frame = frame.as_video_frame()
