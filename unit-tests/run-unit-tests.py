@@ -711,19 +711,10 @@ try:
                 if test.name == 'test-fw-update':
                     for sn in serial_numbers:
                         d = devices.get( sn )
-                        ok, reason = fw_compat.is_fw_update_compatible( d, custom_fw_d400_path=custom_fw_path, custom_fw_d555_path=custom_fw_d555_path )
-                        log.d( f'[fw-gate] {d.name}_{sn}: ok={ok} -- {reason}' )
-                        if ok:
-                            continue
-                        fallback = fw_compat.fw_fallback_image_for( d, libci.home )
-                        if fallback:
-                            if custom_fw_path:
-                                log.i( f'{test.name}: {d.name}_{sn} below min FW; --custom-fw-d400 is below min too, overriding with fallback {fallback}' )
-                            else:
-                                log.i( f'{test.name}: {d.name}_{sn} below min FW; using fallback {fallback}' )
-                            fw_d400_override = fallback
-                        else:
-                            log.w( f'{test.name}: {d.name}_{sn} below min FW with no fallback; test will fail' )
+                        _, fw_d400_override = fw_compat.resolve_fw_gate(
+                            d, libci.home, test.name, sn=sn,
+                            custom_fw_d400_path=custom_fw_path,
+                            custom_fw_d555_path=custom_fw_d555_path )
 
                 for repetition in range(repeat):
                     try:

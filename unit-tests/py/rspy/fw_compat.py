@@ -69,6 +69,33 @@ def version_from_fw_filename( path ):
     return '.'.join( m.group( i ) for i in range( 1, 5 ) )
 
 
+def resolve_fw_gate( rspy_device, libci_home, test_name, sn=None,
+                     custom_fw_d400_path=None, custom_fw_d555_path=None ):
+    """
+    Combined fw-gate check and fallback resolution for test-fw-update.
+
+    Returns (skip: bool, fw_override: str|None):
+      - (False, None)   -- compatible or no fallback found; run the test normally
+      - (False, <path>) -- below min FW but fallback available; use this image instead
+    """
+    label = f'{rspy_device.name}_{sn}' if sn else rspy_device.name
+    ok, reason = is_fw_update_compatible( rspy_device,
+                                          custom_fw_d400_path=custom_fw_d400_path,
+                                          custom_fw_d555_path=custom_fw_d555_path )
+    log.d( f'[fw-gate] {label}: ok={ok} -- {reason}' )
+    if ok:
+        return False, None
+    fallback = fw_fallback_image_for( rspy_device, libci_home )
+    if fallback:
+        if custom_fw_d400_path:
+            log.i( f'{test_name}: {label} below min FW; --custom-fw-d400 is below min too, overriding with fallback {fallback}' )
+        else:
+            log.i( f'{test_name}: {label} below min FW; using fallback {fallback}' )
+        return False, fallback
+    log.w( f'{test_name}: {label} below min FW with no fallback; test will fail' )
+    return False, None
+
+
 def is_fw_update_compatible( rspy_device, custom_fw_d400_path=None, custom_fw_d555_path=None ):
     """
     Decide whether test-fw-update can run against `rspy_device` with the FW image
