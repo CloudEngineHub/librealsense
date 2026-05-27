@@ -57,7 +57,7 @@ ds_d400_update_device::ds_d400_update_device(
             throw librealsense::invalid_value_exception(
                 rsutils::string::from()
                 << "Minimum firmware version has not been defined for this device: "
-                << std::hex << _pid );
+                << std::hex << pid );
         return it->second;
     }
 

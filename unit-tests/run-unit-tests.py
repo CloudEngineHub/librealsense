@@ -9,7 +9,7 @@ import sys, os, subprocess, re, platform, getopt, time
 current_dir = os.path.dirname( os.path.abspath( __file__ ) )
 sys.path.append( os.path.join( current_dir, 'py' ))
 
-from rspy import log, file, repo, libci, python_path
+from rspy import log, file, repo, libci, python_path, fw_compat
 from rspy.signals import register_signal_handlers
 
 # Make sure the freshly-built pyrealsense2/pyrealdds/pyrsutils win over any copy
@@ -478,13 +478,13 @@ def test_wrapper_( test, configuration=None, repetition=1, curr_retry=0, max_ret
     opts = []
     if rslog:
         opts.append( '--rslog' )
-    # custom_fw_d400_override comes from the FW-compat gate below: when the bundled FW
-    # (or the user-supplied --custom-fw-d400) is below the device's minimum supported FW,
-    # the gate swaps in a per-device fallback image (e.g. D436 -> Signed_Image_UVC_5_17_3_7.bin)
-    # so test-fw-update can still exercise the flash path. The override wins over
-    # --custom-fw-d400. Only D400 has both a populated min-FW map and a fallback entry today;
-    # adding D555/D585S would require a D5xx override of get_firmware_min_version() and a
-    # parallel --custom-fw-d555 override pipe.
+    # custom_fw_d400_override comes from the FW-compat gate below (rspy.fw_compat): when
+    # the bundled FW (or a user-supplied --custom-fw-d400) is below the device's minimum
+    # supported FW, the gate swaps in a per-device fallback image listed in
+    # rspy/fw_fallback.json so test-fw-update can still exercise the flash path. The
+    # override wins over --custom-fw-d400. Only D400 has both a populated min-FW map and
+    # a fallback entry today; adding D555/D585S would require a D5xx override of
+    # get_firmware_min_version() and a parallel --custom-fw-d555 override pipe.
     effective_custom_fw_d400 = custom_fw_d400_override or custom_fw_path
     if test.name == "test-fw-update" and effective_custom_fw_d400:
         opts.append('--custom-fw-d400')
@@ -547,87 +547,6 @@ def close_hubs():
             devices.wait_until_all_ports_disabled()
             devices.hub.disconnect()
 
-
-# Per-device FW image fallbacks used when the bundled FW is below the device's
-# minimum supported FW. Keyed by device name as exposed by rspy.devices.Device
-# (with "Intel RealSense " stripped). Paths are relative to libci.home so they
-# resolve correctly on both Linux (/usr/local/lib/ci) and Windows (C:\LibCI).
-_FW_FALLBACK_RELPATHS = {
-    'D436': 'data/FW/D400/Signed_Image_UVC_5_17_3_7.bin',
-}
-
-
-def _fw_fallback_image_for( rspy_device ):
-    relpath = _FW_FALLBACK_RELPATHS.get( rspy_device.name )
-    if not relpath:
-        return None
-    path = os.path.join( libci.home, relpath )
-    if not os.path.isfile( path ):
-        log.w( f'[fw-gate] fallback FW for {rspy_device.name} not found on disk: {path}' )
-        return None
-    return path
-
-
-def _version_to_tuple( s ):
-    parts = re.findall( r'\d+', s or '' )
-    return tuple( int( p ) for p in parts[:4] ) + (0,) * max( 0, 4 - len( parts ) )
-
-
-def _version_from_fw_filename( path ):
-    """Mirror of test-fw-update.extract_version_from_filename; returns 'a.b.c.d' or None."""
-    name = os.path.basename( path or '' )
-    m = re.search( r'(\d+)_(\d+)_(\d+)_(\d+)\.(?:bin|img)$', name, re.IGNORECASE )
-    if not m:
-        m = re.search( r'-(\d+)\.(\d+)\.(\d+)\.(\d+)\.(?:bin|img)$', name, re.IGNORECASE )
-    if not m:
-        return None
-    return '.'.join( m.group( i ) for i in range( 1, 5 ) )
-
-
-def _is_fw_update_compatible( rspy_device ):
-    """
-    For test-fw-update, compare the candidate FW version (parsed from a custom-fw-*
-    filename if supplied, otherwise RECOMMENDED_FIRMWARE_VERSION) against the device's
-    minimum supported FW via rs2::device::get_firmware_min_version. Returns
-    (compatible, reason). On any can't-decide path returns True so we err on the side
-    of letting the test run.
-    Takes the rspy.devices.Device wrapper; the underlying pyrealsense2 device is
-    available at `.handle`.
-    """
-    try:
-        import pyrealsense2 as rs
-    except ImportError as e:
-        return True, f'pyrealsense2 unavailable ({e})'
-
-    handle = rspy_device.handle
-    product_line = rspy_device.product_line
-    product_name = rspy_device.name  # wrapper strips "Intel RealSense " prefix
-
-    candidate = None
-    source = ''
-    if product_line == 'D400' and custom_fw_path:
-        candidate = _version_from_fw_filename( custom_fw_path )
-        source = f'--custom-fw-d400 {os.path.basename( custom_fw_path )}'
-    elif 'D555' in (product_name or '') and custom_fw_d555_path:
-        candidate = _version_from_fw_filename( custom_fw_d555_path )
-        source = f'--custom-fw-d555 {os.path.basename( custom_fw_d555_path )}'
-    elif handle.supports( rs.camera_info.recommended_firmware_version ):
-        candidate = handle.get_info( rs.camera_info.recommended_firmware_version )
-        source = 'RECOMMENDED_FIRMWARE_VERSION'
-    if not candidate:
-        return True, 'no candidate FW version available; deferring to test'
-
-    try:
-        min_fw = handle.get_firmware_min_version()
-    except Exception as e:
-        return True, f'get_firmware_min_version raised ({e}); deferring to test'
-
-    if not min_fw:
-        return True, f'device reports no minimum FW; deferring (candidate {candidate})'
-
-    if _version_to_tuple( candidate ) >= _version_to_tuple( min_fw ):
-        return True, f'compatible -- candidate {candidate} >= min {min_fw} (candidate from {source})'
-    return False, f'below device min FW -- candidate {candidate} < min {min_fw} (candidate from {source})'
 
 # Run all tests
 try:
@@ -792,11 +711,11 @@ try:
                 if test.name == 'test-fw-update':
                     for sn in serial_numbers:
                         d = devices.get( sn )
-                        ok, reason = _is_fw_update_compatible( d )
+                        ok, reason = fw_compat.is_fw_update_compatible( d, custom_fw_d400_path=custom_fw_path, custom_fw_d555_path=custom_fw_d555_path )
                         log.d( f'[fw-gate] {d.name}_{sn}: ok={ok} -- {reason}' )
                         if ok:
                             continue
-                        fallback = _fw_fallback_image_for( d )
+                        fallback = fw_compat.fw_fallback_image_for( d, libci.home )
                         if fallback:
                             if custom_fw_path:
                                 log.i( f'{test.name}: {d.name}_{sn} below min FW; --custom-fw-d400 is below min too, overriding with fallback {fallback}' )
