@@ -1192,16 +1192,18 @@ class RealSenseManager:
         """Top metadata block, mirrors C++ realsense-viewer."""
         profile = frame_data.get_profile()
         actual_fps_key = rs.frame_metadata_value.actual_fps
+        hardware_fps = profile.fps()
+        if frame_data.supports_frame_metadata(actual_fps_key):
+            try:
+                hardware_fps = frame_data.get_frame_metadata(actual_fps_key) / 1000.0
+            except Exception as exc:
+                logging.debug("[METADATA] failed to read %s: %s", actual_fps_key.name, exc)
         info: Dict[str, Any] = {
             "timestamp": frame_data.get_timestamp(),
             "frame_number": frame_data.get_frame_number(),
             "clock_domain": frame_data.get_frame_timestamp_domain().name,
             "pixel_format": profile.format().name,
-            "hardware_fps": (
-                frame_data.get_frame_metadata(actual_fps_key) / 1000.0
-                if frame_data.supports_frame_metadata(actual_fps_key)
-                else profile.fps()
-            ),
+            "hardware_fps": hardware_fps,
         }
         try:  # video frames only; motion frames have no width/height
             info["width"] = frame_data.get_width()
@@ -1216,22 +1218,24 @@ class RealSenseManager:
     def _get_frame_metadata(self, frame_data) -> Dict[str, int]:
         """Return all rs2_frame_metadata_value attributes the frame supports.
         Mirrors common/stream-model.cpp:52-59 in the C++ realsense-viewer.
-        Caches the supported subset per stream profile uid so the per-frame cost
-        is one cheap dict lookup + N get_frame_metadata calls (N = supported count)."""
+        Caches the supported subset per stream profile uid so the steady-state
+        per-frame cost is one dict lookup + N get_frame_metadata calls."""
         try:
             profile_uid = frame_data.get_profile().unique_id()
         except Exception:
             profile_uid = None
 
         supported = self._supported_md_by_profile.get(profile_uid) if profile_uid is not None else None
-        if supported is None:
+        # Build the supported set from the 2nd frame on: delta-computed metadata
+        # (e.g. actual_fps) is not yet available on the first frame.
+        if supported is None and frame_data.get_frame_number() >= 2:
             supported = [md for md in self._FRAME_METADATA_VALUES
                          if frame_data.supports_frame_metadata(md)]
             if profile_uid is not None:
                 self._supported_md_by_profile[profile_uid] = supported
 
         attrs: Dict[str, int] = {}
-        for md in supported:
+        for md in (supported or []):
             try:
                 attrs[md.name] = frame_data.get_frame_metadata(md)
             except Exception as e:
