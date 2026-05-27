@@ -31,7 +31,6 @@ option(BUILD_UNITY_BINDINGS "Copy the unity project to the build folder with the
 option(BUILD_OPENVINO_EXAMPLES "Build Intel OpenVINO Toolkit examples - requires INTEL_OPENVINO_DIR" OFF)
 option(BUILD_OPEN3D_EXAMPLES "Build Open3D examples" OFF)
 option(BUILD_OPENNI2_BINDINGS "Build OpenNI bindings" OFF)
-option(IMPORT_DEPTH_CAM_FW "Download the latest firmware for the depth cameras" ON)
 option(BUILD_CV_KINFU_EXAMPLE "Build OpenCV KinectFusion example" OFF)
 option(FORCE_RSUSB_BACKEND "Use RS USB backend, mandatory for Win7/MacOS/Android, optional for Linux" OFF)
 option(FORCE_LIBUVC "Explicitly turn-on libuvc backend - deprecated, use FORCE_RSUSB_BACKEND instead" OFF)

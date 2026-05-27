@@ -92,7 +92,7 @@ def generate_callbacks(sensor_profiles_dict, profile_name_fps_dict, profile_prev
         frame_ts = frame.get_timestamp()
         if profile_prev_frame_dict[frame.profile.stream_name()] != -1:
             if frame_number > profile_prev_frame_dict[frame.profile.stream_name()] + 1:
-                log.warning( f'Frame drop detected. Current frame number {frame_number} previous was {profile_prev_frame_dict[frame.profile.stream_name()]}' )
+                log.warning( f'Frame drop detected on {frame.profile.stream_name()}. Current frame number {frame_number} previous was {profile_prev_frame_dict[frame.profile.stream_name()]}' )
         profile_prev_frame_dict[frame.profile.stream_name()] = frame_number
         if count_frames:
             profile_name_fps_dict[profile_name] += 1

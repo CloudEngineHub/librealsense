@@ -384,6 +384,13 @@ namespace librealsense
         init( dev_info->get_context(), dev_info->get_group() );
     }
 
+    d500_device::~d500_device()
+    {
+        // Signal background loops (polling_error_handler) so they exit cleanly on the
+        // next tick instead of firing one more failing FW query before being joined.
+        _device_alive->store( false );
+    }
+
     void d500_device::init(std::shared_ptr<context> ctx,
         const platform::backend_device_group& group)
     {
@@ -583,6 +590,7 @@ namespace librealsense
             _polling_error_handler = std::make_shared< polling_error_handler >(
                 1000,
                 error_control,
+                std::weak_ptr<std::atomic<bool>>( _device_alive ),
                 raw_depth_sensor->get_notifications_processor(),
                 std::make_shared< ds_notification_decoder >( d500_fw_error_report ) );
 
@@ -680,8 +688,6 @@ namespace librealsense
         register_info(RS2_CAMERA_INFO_DEBUG_OP_CODE, std::to_string(static_cast<int>(fw_cmd::GET_FW_LOGS)));
         register_info(RS2_CAMERA_INFO_PRODUCT_ID, pid_hex_str);
         register_info(RS2_CAMERA_INFO_PRODUCT_LINE, "D500");
-        // Uncomment once D500 recommended FW exist
-        //register_info(RS2_CAMERA_INFO_RECOMMENDED_FIRMWARE_VERSION, _recommended_fw_version);
         register_info(RS2_CAMERA_INFO_CAMERA_LOCKED, _is_locked ? "YES" : "NO");
 
         if (_pid == D585S_PID)

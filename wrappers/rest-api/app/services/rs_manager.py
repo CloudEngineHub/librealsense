@@ -5,10 +5,6 @@ import asyncio
 import threading
 import time
 import logging
-import re
-import hashlib
-import urllib.request
-from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple, Set
 import pyrealsense2 as rs
 import numpy as np
@@ -30,28 +26,7 @@ from datetime import datetime
 from app.services.metadata_socket_server import MetadataSocketServer
 
 
-FW_STATUS_UP_TO_DATE = "up_to_date"
-FW_STATUS_OUTDATED = "outdated"
-FW_STATUS_MISSING_FILE = "missing_file"
 FW_STATUS_UNKNOWN = "unknown"
-
-
-def _compare_versions(version_a: Optional[str], version_b: Optional[str]) -> int:
-    """Return -1/0/1 comparing dotted numeric firmware versions; unknowns sort last."""
-    if not version_a or not version_b:
-        return 0
-    try:
-        parts_a = [int(p) for p in version_a.split(".")]
-        parts_b = [int(p) for p in version_b.split(".")]
-        # Normalize lengths
-        max_len = max(len(parts_a), len(parts_b))
-        parts_a += [0] * (max_len - len(parts_a))
-        parts_b += [0] * (max_len - len(parts_b))
-        if parts_a == parts_b:
-            return 0
-        return -1 if parts_a < parts_b else 1
-    except Exception:
-        return 0
 
 
 class RealSenseManager:
@@ -94,18 +69,9 @@ class RealSenseManager:
         # Store latest raw depth frames for pixel depth queries
         self.depth_frames: Dict[str, Any] = {}  # device_id -> rs.depth_frame
 
-        # Firmware update tracking
-        self._fw_updates_in_progress: Set[str] = set()
-
-        # Firmware bundle resolution
-        # Source directory paths
-        self._fw_header_path = Path(__file__).resolve().parents[4] / "common" / "fw" / "firmware-version.h"
-        self._fw_dir = self._fw_header_path.parent
-        # Build directory path (CMake downloads firmware here)
-        self._fw_build_dir = Path(__file__).resolve().parents[4] / "build" / "common" / "fw"
-        self._fw_bundle_cache: Dict[str, Optional[Path]] = {}
-        self._fw_cmake_path = self._fw_dir / "CMakeLists.txt"
-        self._fw_base_url = "https://librealsense.realsenseai.com/Releases/RS4xx/FW"
+        # Cache of supported frame_metadata values per stream profile uid.
+        # Avoids re-probing every metadata key on every frame in the hot loop.
+        self._supported_md_by_profile: Dict[int, list] = {}
 
         self.sio = sio
         self.metadata_socket_server = MetadataSocketServer(sio, self)
@@ -145,157 +111,6 @@ class RealSenseManager:
             asyncio.run_coroutine_threadsafe(self.sio.emit(event, payload), loop)
         except Exception as exc:
             logging.warning("Socket emit failed (%s): %s", event, exc)
-
-    def _load_header_version(self) -> Optional[str]:
-        """Parse the bundled firmware version from common/fw/firmware-version.h (D4XX only)."""
-        try:
-            if not self._fw_header_path.exists():
-                logging.error("Firmware version header not found at %s", self._fw_header_path)
-                return None
-            text = self._fw_header_path.read_text(encoding="utf-8", errors="ignore")
-            match = re.search(r"D4XX_RECOMMENDED_FIRMWARE_VERSION\s+\"([0-9.]+)\"", text)
-            return match.group(1) if match else None
-        except Exception as exc:
-            logging.error("Failed to parse firmware-version.h: %s", exc)
-            return None
-
-    def _get_recommended_firmware_version(self, dev: rs.device) -> Optional[str]:
-        """
-        Return recommended firmware version following the C++ viewer logic:
-        1. Get the bundled/available firmware version from firmware-version.h
-        2. Get the device's recommended version
-        3. If current FW is upgradeable to bundled version, use bundled version
-        4. Otherwise use device's recommended version or bundled version
-        """
-        bundled_version = self._load_header_version()
-        
-        device_recommended = None
-        try:
-            if dev.supports(rs.camera_info.recommended_firmware_version):
-                device_recommended = dev.get_info(rs.camera_info.recommended_firmware_version)
-        except RuntimeError:
-            pass
-        
-        current_fw = None
-        try:
-            if dev.supports(rs.camera_info.firmware_version):
-                current_fw = dev.get_info(rs.camera_info.firmware_version)
-        except RuntimeError:
-            pass
-        
-        # Follow C++ logic: if current FW is upgradeable to bundled version, use bundled
-        if current_fw and bundled_version:
-            if _compare_versions(current_fw, bundled_version) < 0:
-                # Current FW is older than bundled, recommend bundled version
-                return bundled_version
-        
-        # If bundled version exists, prefer it (matches C++ behavior)
-        if bundled_version:
-            return bundled_version
-        
-        # Fallback to device's recommended version
-        return device_recommended
-
-    def _is_update_device(self, dev: rs.device) -> bool:
-        """Check if a device is in DFU/update mode."""
-        try:
-            rs.update_device(dev)
-            return True
-        except Exception:
-            return False
-
-    def _load_cmake_fw_sha1(self) -> Optional[str]:
-        """Parse SHA1 from common/fw/CMakeLists.txt (D4XX_FW_SHA1)."""
-        try:
-            if not self._fw_cmake_path.exists():
-                return None
-            text = self._fw_cmake_path.read_text(encoding="utf-8", errors="ignore")
-            m = re.search(r"set\(D4XX_FW_SHA1\s+([0-9a-fA-F]{40})\)", text)
-            return m.group(1) if m else None
-        except Exception:
-            return None
-
-    def _download_firmware(self, version: str, dest: Path) -> bool:
-        """Download firmware file to dest and verify SHA1 only when we know it for this version."""
-        if not re.match(r'^\d+\.\d+\.\d+\.\d+$', version):
-            logging.error("Rejected invalid firmware version string: %s", version)
-            return False
-        try:
-            url = f"{self._fw_base_url}/D4XX_FW_Image-{version}.bin"
-            logging.info("Downloading firmware %s -> %s", url, dest)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            with urllib.request.urlopen(url) as resp, open(dest, "wb") as out:
-                out.write(resp.read())
-            # Only enforce SHA when the requested version matches the header's version
-            header_version = self._load_header_version()
-            sha_expected = self._load_cmake_fw_sha1() if header_version and header_version == version else None
-            if sha_expected:
-                sha = hashlib.sha256()
-                with open(dest, "rb") as f:
-                    for chunk in iter(lambda: f.read(8192), b""):
-                        sha.update(chunk)
-                if sha.hexdigest().lower() != sha_expected.lower():
-                    logging.error("Firmware SHA1 mismatch for %s", dest)
-                    try:
-                        dest.unlink(missing_ok=True)
-                    except Exception:
-                        pass
-                    return False
-            return True
-        except Exception as exc:
-            logging.error("Firmware download failed: %s", exc)
-            try:
-                if dest.exists():
-                    dest.unlink(missing_ok=True)
-            except Exception:
-                pass
-            return False
-
-    def _resolve_firmware_bundle(self, dev: rs.device, recommended_version: Optional[str]) -> Optional[Path]:
-        """
-        Map device to bundled firmware image path. Currently supports D4XX by default.
-        Checks build directory first (CMake downloads firmware there), then source directory.
-        Returns the path only if it exists.
-        """
-        if not recommended_version:
-            return None
-
-        try:
-            product_line = dev.get_info(rs.camera_info.product_line) if dev.supports(rs.camera_info.product_line) else ""
-        except RuntimeError:
-            product_line = ""
-
-        filename = None
-
-        # Default to D4XX bundle naming convention used by common/fw target
-        if "D4" in product_line or "D4" in (dev.get_info(rs.camera_info.name) if dev.supports(rs.camera_info.name) else ""):
-            filename = f"D4XX_FW_Image-{recommended_version}.bin"
-
-        if not filename:
-            return None
-
-        # Check build directory first (CMake downloads the recommended firmware here)
-        build_path = self._fw_build_dir / filename
-        if build_path.exists():
-            logging.debug("Found firmware in build directory: %s", build_path)
-            return build_path
-
-        # Check source directory
-        source_path = self._fw_dir / filename
-        if source_path.exists():
-            logging.debug("Found firmware in source directory: %s", source_path)
-            return source_path
-
-        # Try to auto-download the bundle once if version is known
-        if recommended_version:
-            # Download to source directory (for persistence across builds)
-            ok = self._download_firmware(recommended_version, source_path)
-            if ok and source_path.exists():
-                return source_path
-
-        logging.error("Firmware bundle missing for device %s (product_line=%s): looked in %s and %s", 
-                      dev, product_line, build_path, source_path)
-        return None
 
     def refresh_devices(self) -> List[DeviceInfo]:
         """Refresh the list of connected devices"""
@@ -337,19 +152,10 @@ class RealSenseManager:
                 except RuntimeError:
                     firmware_version = None
 
-                recommended_version = self._get_recommended_firmware_version(dev)
-                fw_bundle_path = self._resolve_firmware_bundle(dev, recommended_version)
-                fw_file_exists = fw_bundle_path is not None and fw_bundle_path.exists()
-
+                # Bundled firmware support was removed; we no longer compare against a recommended version.
+                recommended_version = None
+                fw_file_exists = False
                 firmware_status = FW_STATUS_UNKNOWN
-                if firmware_version and recommended_version:
-                    cmp = _compare_versions(firmware_version, recommended_version)
-                    if cmp < 0:
-                        firmware_status = FW_STATUS_OUTDATED if fw_file_exists else FW_STATUS_MISSING_FILE
-                    else:
-                        firmware_status = FW_STATUS_UP_TO_DATE
-                elif recommended_version and not fw_file_exists:
-                    firmware_status = FW_STATUS_MISSING_FILE
 
                 try:
                     physical_port = dev.get_info(rs.camera_info.physical_port)
@@ -429,290 +235,9 @@ class RealSenseManager:
         return {
             "device_id": device_id,
             "current": device.firmware_version,
-            "recommended": device.recommended_firmware_version,
+            "recommended": None,
             "status": device.firmware_status or FW_STATUS_UNKNOWN,
-            "file_available": device.firmware_file_available,
-        }
-
-    def update_firmware(self, device_id: str) -> Dict[str, Any]:
-        """Run firmware update using bundled image; disallow when streaming or file missing."""
-        # Prevent concurrent updates per-device
-        with self.lock:
-            if device_id in self._fw_updates_in_progress:
-                raise RealSenseError(status_code=409, detail="Firmware update already in progress")
-            self._fw_updates_in_progress.add(device_id)
-
-        # Don't call refresh_devices here as it can invalidate device handles
-        if device_id not in self.devices:
-            with self.lock:
-                self._fw_updates_in_progress.discard(device_id)
-            raise RealSenseError(status_code=404, detail=f"Device {device_id} not found")
-
-        # Clean up any stale pipeline entries first
-        with self.lock:
-            # Now check if target device is streaming
-            if device_id in self.pipelines:
-                self._fw_updates_in_progress.discard(device_id)
-                raise RealSenseError(status_code=400, detail="Stop streaming before updating firmware")
-
-        # Get device info for metadata
-        current_info = self.device_infos.get(device_id)
-        recommended = None
-        if current_info:
-            recommended = current_info.recommended_firmware_version
-        
-        # Need to use cached device reference to get recommended version
-        cached_dev = self.devices.get(device_id)
-        if cached_dev and not recommended:
-            recommended = self._get_recommended_firmware_version(cached_dev)
-        
-        if not recommended:
-            raise RealSenseError(status_code=400, detail="Cannot determine recommended firmware version")
-
-        fw_path = self._resolve_firmware_bundle(cached_dev if cached_dev else None, recommended)
-        if not fw_path or not fw_path.exists():
-            logging.error("Firmware update requested but bundle not found for device %s", device_id)
-            raise RealSenseError(status_code=404, detail="Firmware bundle not found for this device")
-
-        # Read firmware image
-        try:
-            fw_bytes = fw_path.read_bytes()
-        except Exception as exc:
-            logging.error("Failed reading firmware bundle %s: %s", fw_path, exc)
-            raise RealSenseError(status_code=500, detail="Unable to read firmware bundle")
-
-        progress_holder = {"value": 0.0}
-        last_emit_ts = {"value": 0.0}
-
-        # Always emit a starting progress so the UI doesn't stay at 0% forever
-        logging.info("Emitting firmware progress start for %s", device_id)
-        self._emit_socket_event(
-            f"firmware_progress_{device_id}",
-            {"device_id": device_id, "progress": 0.0},
-        )
-
-        def _on_progress(p: float):
-            progress_holder["value"] = p
-
-            # Rate-limit progress events to avoid overwhelming the client (max ~10/sec)
-            now = time.time()
-            if now - last_emit_ts["value"] < 0.1 and p < 1.0:
-                return
-            last_emit_ts["value"] = now
-
-            self._emit_socket_event(
-                f"firmware_progress_{device_id}",
-                {"device_id": device_id, "progress": float(p)},
-            )
-
-        try:
-            # Convert bytes to list[int] as required by pyrealsense2 API
-            fw_image = list(fw_bytes)
-            
-            # Get the cached device - this is the most reliable reference
-            target_dev = self.devices.get(device_id)
-            
-            if not target_dev:
-                raise RealSenseError(status_code=404, detail="Device not found for firmware update")
-            
-            # Get FIRMWARE_UPDATE_ID - this is the key identifier that persists across DFU transitions
-            # (unlike serial_number which may not be available in DFU mode)
-            firmware_update_id = None
-            try:
-                if target_dev.supports(rs.camera_info.firmware_update_id):
-                    firmware_update_id = target_dev.get_info(rs.camera_info.firmware_update_id)
-                else:
-                    # Try getting from first sensor
-                    sensors = target_dev.query_sensors()
-                    if sensors:
-                        firmware_update_id = sensors[0].get_info(rs.camera_info.firmware_update_id)
-            except RuntimeError:
-                pass
-            
-            if not firmware_update_id:
-                logging.warning("Could not get firmware_update_id, will use serial_number for matching")
-                firmware_update_id = device_id
-            
-            logging.info("Firmware Update ID for tracking: %s", firmware_update_id)
-            
-            # Check if device is already in update mode (is an update_device)
-            update_dev = None
-            try:
-                update_dev = rs.update_device(target_dev)
-                logging.info("Device is already in update/DFU mode")
-            except Exception:
-                # Device is not in update mode, need to cast to updatable and enter update state
-                pass
-            
-            if not update_dev:
-                # Device is in normal mode, need to transition to DFU mode
-                logging.info("Device is in normal mode, checking firmware compatibility...")
-                
-                # Cast to updatable
-                updatable = rs.updatable(target_dev)
-                
-                # Check firmware compatibility before proceeding
-                try:
-                    if not updatable.check_firmware_compatibility(fw_image):
-                        raise RealSenseError(status_code=400, detail="Firmware is not compatible with this device")
-                    logging.info("Firmware compatibility check passed")
-                except Exception as e:
-                    logging.warning("Firmware compatibility check failed or not supported: %s", e)
-                
-                # Clear the cached device reference since it will become invalid
-                with self.lock:
-                    if device_id in self.devices:
-                        del self.devices[device_id]
-                    if device_id in self.device_infos:
-                        del self.device_infos[device_id]
-                
-                logging.info("Requesting device to enter update/DFU mode...")
-                updatable.enter_update_state()
-                
-                # Wait for device to reconnect in DFU/update mode
-                # Use firmware_update_id to match the device (as in the C++ viewer)
-                max_wait_seconds = 60  # Same as C++ viewer timeout
-                
-                logging.info("Waiting for device to reconnect in DFU mode (timeout: %ds)...", max_wait_seconds)
-                start_time = time.time()
-                
-                while time.time() - start_time < max_wait_seconds:
-                    time.sleep(0.5)
-                    try:
-                        # Query for update devices
-                        devs = self.ctx.query_devices()
-                        for dev in devs:
-                            try:
-                                # Check if this is an update_device
-                                candidate = rs.update_device(dev)
-                                
-                                # Try to match by firmware_update_id
-                                try:
-                                    if dev.supports(rs.camera_info.firmware_update_id):
-                                        dev_fw_id = dev.get_info(rs.camera_info.firmware_update_id)
-                                        if dev_fw_id == firmware_update_id:
-                                            logging.info("Found DFU device with matching firmware_update_id: %s", dev_fw_id)
-                                            update_dev = candidate
-                                            break
-                                except RuntimeError:
-                                    pass
-                                
-                                # If only one update_device exists, assume it's ours
-                                if not update_dev:
-                                    update_device_count = sum(1 for d in devs if self._is_update_device(d))
-                                    if update_device_count == 1:
-                                        logging.info("Found single DFU device, assuming it's the target")
-                                        update_dev = candidate
-                                        break
-                                        
-                            except Exception:
-                                # Not an update_device, skip
-                                continue
-                        
-                        if update_dev:
-                            break
-                    except Exception as e:
-                        logging.debug("Error querying devices during DFU wait: %s", e)
-                        continue
-                
-                if not update_dev:
-                    raise RealSenseError(status_code=500, detail="Device did not enter DFU mode within timeout. Please reconnect the device and try again.")
-            
-            # Perform the firmware update on the DFU device
-            logging.info("Starting firmware update on DFU device...")
-            update_dev.update(fw_image, _on_progress)
-            
-            logging.info("Firmware download completed, waiting for device to finalize...")
-            time.sleep(3)  # Wait for DFU transition as per C++ code
-            
-            # Wait for original device to reconnect with new firmware
-            logging.info("Waiting for device to reconnect with new firmware...")
-            max_reconnect_seconds = 60
-            reconnected = False
-            start_time = time.time()
-            
-            while time.time() - start_time < max_reconnect_seconds:
-                time.sleep(1)
-                try:
-                    devs = self.ctx.query_devices()
-                    for dev in devs:
-                        try:
-                            # Skip update_devices (still in DFU mode)
-                            if self._is_update_device(dev):
-                                continue
-                            
-                            # Check if sensors have the matching firmware_update_id
-                            sensors = dev.query_sensors()
-                            if sensors:
-                                try:
-                                    dev_fw_id = sensors[0].get_info(rs.camera_info.firmware_update_id)
-                                    if dev_fw_id == firmware_update_id:
-                                        logging.info("Original device reconnected successfully (FW Update ID: %s)", dev_fw_id)
-                                        reconnected = True
-                                        break
-                                except RuntimeError:
-                                    pass
-                            
-                            # Also try matching by serial number
-                            try:
-                                if dev.supports(rs.camera_info.serial_number):
-                                    sn = dev.get_info(rs.camera_info.serial_number)
-                                    if sn == device_id:
-                                        logging.info("Original device reconnected successfully (Serial: %s)", sn)
-                                        reconnected = True
-                                        break
-                            except RuntimeError:
-                                pass
-                        except Exception:
-                            continue
-                    
-                    if reconnected:
-                        break
-                except Exception as e:
-                    logging.debug("Error querying devices during reconnect wait: %s", e)
-                    continue
-            
-            if not reconnected:
-                logging.warning("Device did not reconnect within timeout, but update may have succeeded")
-                # Don't fail here - the update itself completed successfully
-        except Exception as exc:
-            logging.error("Firmware update failed for %s: %s", device_id, exc)
-            # Emit failure event
-            self._emit_socket_event(
-                f"firmware_update_failed_{device_id}",
-                {"device_id": device_id, "error": str(exc)},
-            )
-            raise RealSenseError(status_code=500, detail=f"Firmware update failed: {str(exc)}")
-        finally:
-            with self.lock:
-                self._fw_updates_in_progress.discard(device_id)
-
-        # Refresh device list to pick up new FW version
-        self.refresh_devices()
-        updated_info = self.device_infos.get(device_id)
-
-        # Ensure the UI receives a completion progress update even if the device callback didn't
-        logging.info("Emitting firmware progress completion for %s", device_id)
-        self._emit_socket_event(
-            f"firmware_progress_{device_id}",
-            {"device_id": device_id, "progress": 1.0},
-        )
-
-        # Emit success event
-        logging.info("Emitting firmware update success for %s", device_id)
-        self._emit_socket_event(
-            f"firmware_update_success_{device_id}",
-            {
-                "device_id": device_id,
-                "firmware_version": updated_info.firmware_version if updated_info else None,
-            },
-        )
-
-        return {
-            "device_id": device_id,
-            "progress": progress_holder["value"],
-            "firmware_version": updated_info.firmware_version if updated_info else None,
-            "status": "success",
+            "file_available": False,
         }
 
     def reset_device(self, device_id: str) -> bool:
@@ -1484,6 +1009,7 @@ class RealSenseManager:
                     self.pipeline_signatures.pop(device_id, None)
                     self.frame_queues.pop(device_id, None)
                     self.metadata_queues.pop(device_id, None)
+                    self._supported_md_by_profile.clear()
                     self.stopping.discard(device_id)
                     # Reset streaming mode to idle
                     self.streaming_mode[device_id] = "idle"
@@ -1656,6 +1182,64 @@ class RealSenseManager:
                     detail=f"Stream type '{stream_key}' is not active for device {device_id}.",
                 )
 
+    # TODO: replace with `list(rs.frame_metadata_value)` once pyrealsense2 ships
+    # with pybind11 >= 2.12 (added __iter__ on py::enum_). Current PyPI wheels
+    # use older pybind11 where the enum is not iterable.
+    _FRAME_METADATA_VALUES = list(rs.frame_metadata_value.__members__.values())
+
+    @staticmethod
+    def _build_viewer_info(frame_data) -> Dict[str, Any]:
+        """Top metadata block, mirrors C++ realsense-viewer."""
+        profile = frame_data.get_profile()
+        actual_fps_key = rs.frame_metadata_value.actual_fps
+        info: Dict[str, Any] = {
+            "timestamp": frame_data.get_timestamp(),
+            "frame_number": frame_data.get_frame_number(),
+            "clock_domain": frame_data.get_frame_timestamp_domain().name,
+            "pixel_format": profile.format().name,
+            "hardware_fps": (
+                frame_data.get_frame_metadata(actual_fps_key) / 1000.0
+                if frame_data.supports_frame_metadata(actual_fps_key)
+                else profile.fps()
+            ),
+        }
+        try:  # video frames only; motion frames have no width/height
+            info["width"] = frame_data.get_width()
+            info["height"] = frame_data.get_height()
+            vsp = profile.as_video_stream_profile()
+            info["hardware_width"] = vsp.width()
+            info["hardware_height"] = vsp.height()
+        except Exception:
+            pass
+        return info
+
+    def _get_frame_metadata(self, frame_data) -> Dict[str, int]:
+        """Return all rs2_frame_metadata_value attributes the frame supports.
+        Mirrors common/stream-model.cpp:52-59 in the C++ realsense-viewer.
+        Caches the supported subset per stream profile uid so the per-frame cost
+        is one cheap dict lookup + N get_frame_metadata calls (N = supported count)."""
+        try:
+            profile_uid = frame_data.get_profile().unique_id()
+        except Exception:
+            profile_uid = None
+
+        supported = self._supported_md_by_profile.get(profile_uid) if profile_uid is not None else None
+        if supported is None:
+            supported = [md for md in self._FRAME_METADATA_VALUES
+                         if frame_data.supports_frame_metadata(md)]
+            if profile_uid is not None:
+                self._supported_md_by_profile[profile_uid] = supported
+
+        attrs: Dict[str, int] = {}
+        for md in supported:
+            try:
+                attrs[md.name] = frame_data.get_frame_metadata(md)
+            except Exception as e:
+                # supports_frame_metadata said yes; getting the value should not throw.
+                logging.debug("[METADATA] failed to read %s: %s", md.name, e)
+                continue
+        return attrs
+
     def _collect_frames(self, device_id: str, align_processor=None):
         """Thread function to collect frames from the pipeline"""
         logging.debug("[INFO] Frame collection thread started for device %s", device_id)
@@ -1751,10 +1335,8 @@ class RealSenseManager:
 
                             # Add metadata
                             metadata = {
-                                "timestamp": frame_data.get_timestamp(),
-                                "frame_number": frame_data.get_frame_number(),
-                                "width": getattr(frame_data, "get_width", lambda: 640)() or 640,
-                                "height": getattr(frame_data, "get_height", lambda: 480)() or 480,
+                                "frame_metadata": self._get_frame_metadata(frame_data),
+                                **self._build_viewer_info(frame_data),
                             }
 
                             if rs_stream == rs.stream.gyro or rs_stream == rs.stream.accel:
@@ -1816,6 +1398,7 @@ class RealSenseManager:
                             del self.metadata_queues[device_id]
                         if device_id in self.depth_frames:
                             del self.depth_frames[device_id]
+                        self._supported_md_by_profile.clear()
                         if device_id in self.device_infos:
                             self.device_infos[device_id].is_streaming = False
             except Exception:
@@ -2054,9 +1637,9 @@ class RealSenseManager:
     ) -> Tuple[Optional[Any], dict]:
         """Process a single sensor frame; return (processed_frame, metadata)."""
         processed_frame = None
+        info_source = frame  # frame to read info from after post processing is done
         metadata: dict = {
-            "timestamp": frame.get_timestamp(),
-            "frame_number": frame.get_frame_number(),
+            "frame_metadata": self._get_frame_metadata(frame),
         }
 
         if "depth" in frame_stream_name:
@@ -2065,20 +1648,17 @@ class RealSenseManager:
             self.depth_frames[device_id] = depth_frame
             colorized = colorizer.colorize(depth_frame)
             processed_frame = np.asanyarray(colorized.get_data())
-            metadata["width"] = depth_frame.get_width()
-            metadata["height"] = depth_frame.get_height()
+            info_source = depth_frame
 
         elif "color" in frame_stream_name:
             color_frame = frame.as_video_frame()
             color_frame = self._apply_color_filters(device_id, color_frame)
             processed_frame = np.asanyarray(color_frame.get_data())
-            metadata["width"] = color_frame.get_width()
-            metadata["height"] = color_frame.get_height()
+            info_source = color_frame
 
         elif "infrared" in frame_stream_name:
             processed_frame = np.asanyarray(frame.get_data())
-            metadata["width"] = frame.as_video_frame().get_width()
-            metadata["height"] = frame.as_video_frame().get_height()
+            info_source = frame.as_video_frame()
 
         elif "gyro" in frame_stream_name or "accel" in frame_stream_name:
             motion_frame = frame.as_motion_frame()
@@ -2095,9 +1675,8 @@ class RealSenseManager:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 255, 100), 1)
             cv2.putText(processed_frame, f"Z: {motion_data.z:.3f}", (10, 90),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 100, 255), 1)
-            metadata["width"] = 320
-            metadata["height"] = 120
 
+        metadata.update(self._build_viewer_info(info_source))
         return processed_frame, metadata
 
     def _collect_sensor_frames(

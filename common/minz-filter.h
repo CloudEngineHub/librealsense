@@ -10,11 +10,11 @@
 #include "min-z-depth-improver.h"
 
 // rs2::filter adapter for min_z_depth_improver.
-// Plugs directly into the per-sensor post_processing chain so it can be
-// positioned relative to temporal / spatial / hole-filling by the user.
-// Upstream depth filters (temporal, spatial) never touch IR frames, so the
-// frameset arriving here carries original IR alongside the already-filtered
-// depth — exactly what DepthRangeImprover needs.
+// Placed first in the per-sensor post_processing chain, before decimation and
+// other depth filters, so that depth and IR frames arrive at the same full
+// resolution.  Decimation reduces depth resolution while leaving IR unchanged,
+// which would trigger the resolution-mismatch guard in apply() — running MinZ
+// first avoids that.
 class minz_filter : public rs2::filter
 {
     std::shared_ptr< min_z_depth_improver > _improver;

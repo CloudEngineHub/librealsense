@@ -25,12 +25,6 @@
 
 #include <imgui_internal.h>
 
-#ifdef INTERNAL_FW
-#include "common/fw/D4XX_FW_Image.h"
-#else
-#define FW_D4XX_FW_IMAGE_VERSION ""
-#endif // INTERNAL_FW
-
 using namespace rs2;
 using namespace rs400;
 

@@ -112,10 +112,9 @@ interface AppState {
   deviceStates: Record<string, DeviceState> // keyed by device_id
   isLoadingDevices: boolean
   hasUserInteracted: boolean // Track if user manually toggled a device (skip auto-activate)
-  fetchDevices: () => Promise<void>
+  fetchDevices: (forceRefresh?: boolean) => Promise<void>
   checkFirmwareUpdates: (deviceId: string) => Promise<void>
-  updateFirmware: (deviceId: string) => Promise<void>
-  
+
   // Device activation (multi-select support)
   toggleDeviceActive: (device: DeviceInfo) => Promise<void>
   getActiveDevices: () => DeviceState[]
@@ -216,10 +215,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
   isLoadingDevices: false,
   hasUserInteracted: false,
   
-  fetchDevices: async () => {
+  fetchDevices: async (forceRefresh = false) => {
+    // Guard against concurrent fetches: a slow force-refresh must not be clobbered
+    // by a cache-hit poll that resolves after it.
+    if (get().isLoadingDevices) return
     set({ isLoadingDevices: true, error: null })
     try {
-      const devices = await apiClient.getDevices()
+      const devices = await apiClient.getDevices(forceRefresh)
       // Update devices list, preserve existing device states for known devices
       set((state) => {
         const newDeviceStates = { ...state.deviceStates }
@@ -260,7 +262,16 @@ export const useAppStore = create<AppState>()((set, get) => ({
           }
         }
 
-        return { devices, deviceStates: newDeviceStates, isLoadingDevices: false }
+        // Only reconcile selectedDevice on a forced re-enumeration. The 5s poll
+        // can return a momentarily-stale cached list and must not silently null
+        // the user's selection.
+        let selectedDevice = state.selectedDevice
+        if (forceRefresh && state.selectedDevice) {
+          selectedDevice =
+            devices.find(d => d.device_id === state.selectedDevice!.device_id) || null
+        }
+
+        return { devices, deviceStates: newDeviceStates, selectedDevice, isLoadingDevices: false }
       })
       
       // Auto-activate if exactly 1 device and user hasn't manually interacted
@@ -307,76 +318,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
     } catch (error) {
       set({
         error: `Failed to check firmware updates: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      })
-    }
-  },
-
-  updateFirmware: async (deviceId: string) => {
-    // Mark updating state
-    set((state) => {
-      const ds = state.deviceStates[deviceId]
-      if (!ds) return state
-      const prev = ds.firmware || {
-        status: 'unknown' as FirmwareState['status'],
-        current: ds.device.firmware_version,
-        recommended: ds.device.recommended_firmware_version,
-        file_available: ds.device.firmware_file_available,
-        is_updating: false,
-        progress: undefined,
-        last_error: null,
-      }
-      const nextFirmware: FirmwareState = {
-        ...prev,
-        status: prev.status ?? 'unknown',
-        is_updating: true,
-        progress: 0,
-        last_error: null,
-      }
-      return {
-        deviceStates: {
-          ...state.deviceStates,
-          [deviceId]: {
-            ...ds,
-            firmware: nextFirmware,
-          },
-        },
-      }
-    })
-
-    try {
-      await apiClient.updateFirmware(deviceId)
-      // Refresh devices to pick up new firmware version/status
-      await get().fetchDevices()
-      set((state) => {
-        const ds = state.deviceStates[deviceId]
-        if (!ds) return state
-        const prev = ds.firmware || { status: 'unknown' as FirmwareState['status'] }
-        const next: FirmwareState = { ...prev, status: prev.status ?? 'unknown', is_updating: false, progress: 1 }
-        return {
-          deviceStates: {
-            ...state.deviceStates,
-            [deviceId]: { ...ds, firmware: next },
-          },
-        }
-      })
-    } catch (error) {
-      set((state) => {
-        const ds = state.deviceStates[deviceId]
-        if (!ds) return state
-        const prev = ds.firmware || { status: 'unknown' as FirmwareState['status'] }
-        const next: FirmwareState = {
-          ...prev,
-          status: prev.status ?? 'unknown',
-          is_updating: false,
-          last_error: error instanceof Error ? error.message : 'Firmware update failed',
-        }
-        return {
-          deviceStates: {
-            ...state.deviceStates,
-            [deviceId]: { ...ds, firmware: next },
-          },
-          error: `Firmware update failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        }
       })
     }
   },

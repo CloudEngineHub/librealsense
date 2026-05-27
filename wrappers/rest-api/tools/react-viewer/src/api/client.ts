@@ -31,16 +31,9 @@ const getApiBase = () => {
 
 const API_BASE = getApiBase()
 
-type FirmwareProgressCallback = (progress: number) => void
-type FirmwareErrorCallback = (error: string) => void
-type FirmwareSuccessCallback = (firmwareVersion: string | null) => void
-
 class ApiClient {
   private client: AxiosInstance
   private socket: Socket | null = null
-  private firmwareProgressCallbacks: Map<string, FirmwareProgressCallback> = new Map()
-  private firmwareErrorCallbacks: Map<string, FirmwareErrorCallback> = new Map()
-  private firmwareSuccessCallbacks: Map<string, FirmwareSuccessCallback> = new Map()
 
   constructor() {
     this.client = axios.create({
@@ -101,62 +94,6 @@ class ApiClient {
     })
   }
 
-  private subscribeFirmwareEvent<T>(
-    eventName: string,
-    callbackMap: Map<string, T>,
-    deviceId: string,
-    callback: T,
-    handler: (data: unknown) => void
-  ): () => void {
-    callbackMap.set(deviceId, callback)
-    if (this.socket) {
-      this.socket.on(eventName, handler)
-    }
-    return () => {
-      callbackMap.delete(deviceId)
-      if (this.socket) this.socket.off(eventName)
-    }
-  }
-
-  onFirmwareProgress(deviceId: string, callback: FirmwareProgressCallback): () => void {
-    return this.subscribeFirmwareEvent(
-      `firmware_progress_${deviceId}`,
-      this.firmwareProgressCallbacks,
-      deviceId,
-      callback,
-      (data: unknown) => {
-        const cb = this.firmwareProgressCallbacks.get(deviceId)
-        if (cb) cb((data as { progress: number }).progress)
-      }
-    )
-  }
-
-  onFirmwareError(deviceId: string, callback: FirmwareErrorCallback): () => void {
-    return this.subscribeFirmwareEvent(
-      `firmware_update_failed_${deviceId}`,
-      this.firmwareErrorCallbacks,
-      deviceId,
-      callback,
-      (data: unknown) => {
-        const cb = this.firmwareErrorCallbacks.get(deviceId)
-        if (cb) cb((data as { error: string }).error)
-      }
-    )
-  }
-
-  onFirmwareSuccess(deviceId: string, callback: FirmwareSuccessCallback): () => void {
-    return this.subscribeFirmwareEvent(
-      `firmware_update_success_${deviceId}`,
-      this.firmwareSuccessCallbacks,
-      deviceId,
-      callback,
-      (data: unknown) => {
-        const cb = this.firmwareSuccessCallbacks.get(deviceId)
-        if (cb) cb((data as { firmware_version: string | null }).firmware_version)
-      }
-    )
-  }
-
   // ============ Health ============
 
   async getHealth(): Promise<{ status: string; service: string; sdk_version: string }> {
@@ -168,8 +105,10 @@ class ApiClient {
 
   // ============ Devices ============
 
-  async getDevices(): Promise<DeviceInfo[]> {
-    const response = await this.client.get<DeviceInfo[]>('/devices/')
+  async getDevices(forceRefresh: boolean = false): Promise<DeviceInfo[]> {
+    const response = await this.client.get<DeviceInfo[]>('/devices/', {
+      params: { force_refresh: forceRefresh || undefined },
+    })
     return response.data
   }
 
@@ -185,12 +124,7 @@ class ApiClient {
     status: string
     file_available?: boolean
   }> {
-    const response = await this.client.get(`/devices/${deviceId}/status/`)
-    return response.data
-  }
-
-  async updateFirmware(deviceId: string): Promise<{ status: string; firmware_version?: string; progress?: number }> {
-    const response = await this.client.post(`/devices/${deviceId}/update`)
+    const response = await this.client.get(`/devices/${deviceId}/status`)
     return response.data
   }
 

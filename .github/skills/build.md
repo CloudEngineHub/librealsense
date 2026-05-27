@@ -170,7 +170,6 @@ All flags are defined in `CMake/lrs_options.cmake`.
 | `BUILD_WITH_STATIC_CRT` | ON | Link against static CRT (Windows/MSVC) |
 | `CHECK_FOR_UPDATES` | ON (OFF on macOS) | Enable checking for SDK updates |
 | `ENABLE_CCACHE` | ON | Use ccache if available |
-| `IMPORT_DEPTH_CAM_FW` | ON | Download latest depth camera firmware |
 | `BUILD_GLSL_EXTENSIONS` | ON | Build GLSL extensions API |
 | `BUILD_RS2_ALL` | ON | Build `realsense2-all` static bundle (when `BUILD_SHARED_LIBS=OFF`) |
 | `BUILD_ASAN` | OFF | Enable AddressSanitizer |
