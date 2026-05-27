@@ -419,6 +419,63 @@ class TestRealSenseAPI:
         assert result["device_id"] == "device1"
         assert "depth" in result["stream_types"]
 
+    # ----- Tests for the HWM API -----
+
+    def test_hwm_command_basic(self, setup_mock_managers):
+        """POST /devices/{id}/hwm with a minimal request returns 200 and a response list."""
+        response = client.post(
+            "/api/v1/devices/device1/hwm",
+            json={"opcode": 0xA6},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["device_id"] == "device1"
+        assert isinstance(body["response"], list)
+        # Mock returns 4-byte STATUS_OK
+        assert body["response"] == [0, 0, 0, 0]
+
+    def test_hwm_command_with_params(self, setup_mock_managers):
+        """Params and data payload are accepted without error."""
+        response = client.post(
+            "/api/v1/devices/device1/hwm",
+            json={
+                "opcode": 0x14,
+                "param1": 1,
+                "param2": 0xC0DE,
+                "param3": 0,
+                "param4": 0,
+                "data": [0x01, 0x02, 0x03],
+            },
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["device_id"] == "device1"
+        assert isinstance(body["response"], list)
+
+    def test_hwm_command_unknown_device(self, setup_mock_managers):
+        """POST to an unknown device_id returns 404."""
+        response = client.post(
+            "/api/v1/devices/no-such-device/hwm",
+            json={"opcode": 0xA6},
+        )
+        assert response.status_code == 404
+
+    def test_hwm_command_unsupported_device(self, setup_mock_managers):
+        """POST to a device that lacks debug_protocol extension returns 400."""
+        from .pyrealsense_mock import device as MockDevice
+        rs_manager = setup_mock_managers["rs_manager"]
+
+        # Inject a device that does NOT support debug_protocol
+        no_debug_device = MockDevice(serial_number="no-debug", name="Limited Device", supports_debug=False)
+        rs_manager.devices["no-debug"] = no_debug_device
+
+        response = client.post(
+            "/api/v1/devices/no-debug/hwm",
+            json={"opcode": 0xA6},
+        )
+        assert response.status_code == 400
+        assert "does not support" in response.json()["detail"].lower()
+
     @pytest.mark.asyncio
     async def test_close_webrtc_session(self, setup_mock_managers):
         # First create offer
@@ -696,3 +753,41 @@ class TestRealSenseAPIIntegration:
 
         retrieved_option = response.json()
         assert retrieved_option["option_id"] == option_id
+
+    def test_hwm_command_rs(self):
+        """Test sending a hardware monitor command (GVD opcode) to a real device."""
+        import importlib
+        import sys
+
+        if 'app.api.dependencies' in sys.modules:
+            importlib.reload(sys.modules['app.api.dependencies'])
+
+        from main import app
+        from fastapi.testclient import TestClient
+
+        real_client = TestClient(app)
+
+        response = real_client.get("/api/v1/devices")
+        if response.status_code == 500:
+            pytest.skip("No RealSense devices connected or RealSense library issue")
+
+        devices = response.json()
+        if not devices:
+            pytest.skip("No RealSense devices connected")
+
+        device_id = devices[0]["device_id"]
+
+        # GVD (Get Version and Date) is opcode 0x10 — safe read-only command
+        hwm_response = real_client.post(
+            f"/api/v1/devices/{device_id}/hwm",
+            json={"opcode": 0x10},
+        )
+
+        if hwm_response.status_code == 400:
+            pytest.skip(f"Device {device_id} does not support hardware monitor commands")
+
+        assert hwm_response.status_code == 200
+        body = hwm_response.json()
+        assert body["device_id"] == device_id
+        assert isinstance(body["response"], list)
+        assert len(body["response"]) > 0
