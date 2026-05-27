@@ -80,6 +80,12 @@ void config_file::save(const char* filename)
     std::lock_guard< std::recursive_mutex > lk( _mutex );
     try
     {
+        if (filename == nullptr)
+        {
+            LOG_ERROR("Config file name is null, cannot save config.");
+            return;
+        }
+
         std::ostringstream oss;
         oss << std::setw(2) << _j;
         auto result = rsutils::os::atomic_write_file(filename, oss.str());
