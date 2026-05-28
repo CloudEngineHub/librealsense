@@ -81,6 +81,25 @@ class TestCliOptionsRegistered:
         assert len(calls) == 2
         assert all(c['recycle'] is True for c in calls)
 
+    def test_retries_recreate_module_fixture(self):
+        """Module-scoped fixtures must be torn down and re-instantiated between
+        retry attempts.  This is the core mechanic the conftest's
+        ``test_device_wrapped`` (and any other module-scoped precondition fixture)
+        relies on for the device recycle / re-apply behaviour on retry."""
+        rc, out, _ = run_e2e("pytest-retry-module-fixture.py", "--retries", "1")
+        assert_outcomes(out, passed=1)
+        assert rc == 0
+
+    def test_retries_on_setup_error(self):
+        """Setup-phase ERROR on attempt 1 must still trigger a retry.
+
+        Regression for Jenkins win #113344.  Native pytest-retry skips setup
+        failures by default (retry_plugin.py:148-149); conftest.py patches
+        ``should_handle_retry`` to relax that gate."""
+        rc, out, _ = run_e2e("pytest-retry-setup-fail.py", "--retries", "1")
+        assert_outcomes(out, passed=1)
+        assert rc == 0
+
     def test_repeat(self):
         """--repeat 3 should repeat the test 3 times, recycling the device each time."""
         rc, out, tracking = run_e2e("pytest-device-setup.py", "-k", "test_d455 and not excluded",

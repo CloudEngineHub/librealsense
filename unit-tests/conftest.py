@@ -218,6 +218,24 @@ def pytest_configure(config):
     # up to N times, and the plugin tears down + re-creates module/class-scoped
     # fixtures between attempts (the "Fakeboi" trick in retry_plugin.py:207-215),
     # which gives us free device recycling and precondition re-apply.
+    #
+    # By default pytest-retry's `should_handle_retry` skips setup/teardown phase
+    # failures.  We relax that to also retry setup-phase failures (call.when ==
+    # "setup"), since those are the common case for transient hub/USB glitches
+    # at fixture time — the retry loop already does the right thing (tears down
+    # then re-runs setup + call), it just refuses to enter for setup failures.
+    # Teardown still excluded — re-running teardown after a teardown failure
+    # is brittle and matches pytest-retry's upstream stance.
+    # Regression for Jenkins win #113344 (fixture-time ERRORs must trigger retry).
+    try:
+        from pytest_retry import retry_plugin
+        def _retry_setup_too(call):
+            if call.excinfo is None or call.excinfo.typename == "Skipped":
+                return False
+            return call.when in ("setup", "call")
+        retry_plugin.should_handle_retry = _retry_setup_too
+    except ImportError:
+        pass
 
     # We override pytest-repeat's `__pytest_repeat_step_number` to module scope so
     # module-scoped fixtures (e.g. module_device_setup) can depend on it and re-instantiate
