@@ -14,7 +14,7 @@ def test_always_passes(module_device_setup):
 
 def test_fails_then_passes(module_device_setup):
     """Fail on attempt 1, pass on attempt 2 (after pytest-retry tears down +
-    re-creates module fixtures via the 'Fakeboi' preliminary teardown)."""
+    re-creates module fixtures via its preliminary teardown trick)."""
     global _fail_attempt
     _fail_attempt += 1
     if _fail_attempt == 1:

@@ -216,8 +216,8 @@ def pytest_configure(config):
 
     # --retries N is handled natively by the pytest-retry plugin: failed tests rerun
     # up to N times, and the plugin tears down + re-creates module/class-scoped
-    # fixtures between attempts (the "Fakeboi" trick in retry_plugin.py:207-215),
-    # which gives us free device recycling and precondition re-apply.
+    # fixtures between attempts (pytest-retry's preliminary teardown trick,
+    # retry_plugin.py:207), which gives us free device recycling and precondition re-apply.
     #
     # By default pytest-retry's `should_handle_retry` skips setup/teardown phase
     # failures.  We relax that to also retry setup-phase failures (call.when ==
