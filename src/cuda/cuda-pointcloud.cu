@@ -102,18 +102,19 @@ void rscuda::pointcloud_cuda_helper::deproject_depth_cuda( float * points, const
         _intrin_cached = intrin;
     }
 
-    cudaMemcpy( _d_depth.get(), depth, count * sizeof( uint16_t ), cudaMemcpyHostToDevice );
+    RS_CUDA_CHECK( cudaMemcpy( _d_depth.get(), depth, count * sizeof( uint16_t ), cudaMemcpyHostToDevice ) );
 
     // 2D launch: warp-sized x dimension keeps a warp's lanes aligned with consecutive pixels,
     // so depth reads stay coalesced. y dimension is sized to hit the threads-per-block target.
     // Using 1D grid will require integer division (which is ~20-30 cycles on the GPU since there
     // is no hardware integer divider).
-    const dim3 block( THREAD_IN_WARP, RS2_CUDA_THREADS_PER_BLOCK / THREAD_IN_WARP );
+    const dim3 block( rscuda::THREADS_IN_WARP, THREADS_PER_BLOCK / rscuda::THREADS_IN_WARP );
     const dim3 grid( ( intrin.width  + block.x - 1 ) / block.x,
                      ( intrin.height + block.y - 1 ) / block.y );
     kernel_deproject_depth_cuda<<< grid, block >>>( _d_points.get(), _d_intrin.get(), _d_depth.get(), depth_scale );
+    RS_CUDA_CHECK( cudaGetLastError() );
 
-    cudaMemcpy( points, _d_points.get(), count * sizeof( float ) * 3, cudaMemcpyDeviceToHost );
+    RS_CUDA_CHECK( cudaMemcpy( points, _d_points.get(), count * sizeof( float ) * 3, cudaMemcpyDeviceToHost ) );
 }
 
 #endif

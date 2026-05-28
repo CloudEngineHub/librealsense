@@ -21,9 +21,6 @@
 #pragma comment(lib, "cudart_static")
 #endif
 
-#define RS2_CUDA_THREADS_PER_BLOCK 256 // Conventional NVIDIA "if in doubt" default
-#define THREAD_IN_WARP 32              // CUDA warp size; constant across all current NVIDIA archs
-
 namespace rscuda
 {
     // Per-instance helper that owns persistent device buffers and a one-time intrinsics upload,
@@ -32,6 +29,8 @@ namespace rscuda
     class pointcloud_cuda_helper
     {
     public:
+        static constexpr int THREADS_PER_BLOCK = 256; // Conventional NVIDIA "if in doubt" default
+
         void deproject_depth_cuda( float * points, const rs2_intrinsics & intrin, const uint16_t * depth, float depth_scale );
 
     private:
