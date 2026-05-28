@@ -124,7 +124,7 @@ def evaluate_fw_compat( rspy_device, custom_fw_d400_path=None, custom_fw_d555_pa
 
     handle = rspy_device.handle
     product_line = rspy_device.product_line
-    product_name = rspy_device.name  # wrapper strips "Intel RealSense " prefix
+    product_name = rspy_device.name  # wrapper strips "Intel RealSense " / "RealSense " prefix
 
     candidate = None
     source = ''
