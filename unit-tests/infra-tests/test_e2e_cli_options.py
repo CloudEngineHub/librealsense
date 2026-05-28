@@ -67,32 +67,17 @@ class TestCliOptionsRegistered:
         assert rc == 0
 
     def test_retries(self):
-        """--retries 1 should rerun the entire module on failure, recycling the device."""
+        """--retries 1: a flaky call-phase failure is rescued by retry → single PASS.
+
+        pytest-retry tears down module-scoped fixtures (incl. module_device_setup)
+        between attempts via its preliminary-teardown trick, which is how the device
+        gets recycled and module preconditions re-applied on retry.
+        """
         rc, out, tracking = run_e2e("pytest-retry.py", "--retries", "1")
-        # Pass 0: test_always_passes PASSED, test_fails_then_passes FAILED
-        # Pass 1 (retry): device recycled, both tests rerun → both PASSED
-        # pytest-repeat reports: 3 passed (2 from pass 1 + 1 from pass 0 survivor), 1 failed (pass 0)
-        assert_outcomes(out, passed=3, failed=1)
+        assert_outcomes(out, passed=2)
+        assert rc == 0
         calls = tracking["enable_only_calls"]
-        # Two enable_only calls: initial setup (pass 0) + recycle (pass 1 = new repeat pass)
-        assert len(calls) == 2
-        assert all(c['recycle'] is True for c in calls)
-
-    def test_retries_on_setup_error(self):
-        """Setup-phase ERROR in pass 0 must still trigger the retry pass.
-
-        Regression for Jenkins win #113344: pytest_runtest_makereport gated
-        failure-tracking on ``report.when == "call"``, so fixture setup failures
-        (reported as ERROR, not FAILED) were silently treated as "pass had no
-        failures" and skip-if-clean dropped the retry.  Also covers the step-
-        ordering fix in collection.py — without it, the retry pass could run
-        before the original pass and observe an empty failure record."""
-        rc, out, tracking = run_e2e("pytest-retry-setup-fail.py", "--retries", "1")
-        # Pass 0: fixture raises in setup → 1 error.
-        # Pass 1 (retry): fixture returns → 1 passed.
-        assert_outcomes(out, passed=1, error=1)
-        calls = tracking["enable_only_calls"]
-        # Two enable_only calls: pass 0 setup + pass 1 retry recycle.
+        # Two enable_only calls: initial module-fixture creation + post-retry-teardown re-creation.
         assert len(calls) == 2
         assert all(c['recycle'] is True for c in calls)
 

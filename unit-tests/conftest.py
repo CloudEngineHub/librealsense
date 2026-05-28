@@ -192,10 +192,6 @@ def pytest_addoption(parser):
 # Shared context tags (e.g. "nightly", "weekly") — tests check this to adjust behavior
 context_list = []
 
-# Module-scoped retry: tracks which (module, repeat_step) passes had failures.
-# Used by --retries to skip retry passes when the previous pass was clean.
-_module_pass_had_failure = {}  # (module_file, step) -> True
-
 
 def pytest_configure(config):
     """Early setup: register markers, configure defaults, and query connected devices."""
@@ -218,24 +214,16 @@ def pytest_configure(config):
         config.option.count = repeat_val
         config.option.repeat_scope = 'module'
 
-    # --retries N → module-scoped retry.  Run all tests in a file; if any fail,
-    # recycle the device and rerun the *entire* module — up to N extra attempts.
-    # Implemented on top of pytest-repeat (count = N+1, module scope).
-    # pytest-retry's function-level retry is ALWAYS disabled when --retries is used.
-    retries_val = config.getoption('retries', default=0)
-    if retries_val:
-        config.option.retries = 0           # disable pytest-retry function-level retry
-        if config.getoption('count', default=1) <= 1:
-            # --retries without --repeat: add retry passes via pytest-repeat
-            config.option.count = retries_val + 1
-            config.option.repeat_scope = 'module'
-            config._module_retry_mode = True    # skip retry passes when previous pass was clean
+    # --retries N is handled natively by the pytest-retry plugin: failed tests rerun
+    # up to N times, and the plugin tears down + re-creates module/class-scoped
+    # fixtures between attempts (the "Fakeboi" trick in retry_plugin.py:207-215),
+    # which gives us free device recycling and precondition re-apply.
 
     # We override pytest-repeat's `__pytest_repeat_step_number` to module scope so
     # module-scoped fixtures (e.g. module_device_setup) can depend on it and re-instantiate
     # per repeat pass.  That override only makes sense in module-scope repetition.  If a
     # user runs `--count N` *directly* with the default function-scope, force module scope
-    # to stay consistent with the override.  --repeat / --retries already set this above.
+    # to stay consistent with the override.  --repeat already sets this above.
     if config.getoption('count', default=1) > 1 and config.getoption('repeat_scope', default='function') == 'function':
         log.warning("--count > 1 with default function-scope conflicts with our module-scoped "
                     "__pytest_repeat_step_number override; forcing --repeat-scope=module. "
@@ -272,15 +260,9 @@ def pytest_configure(config):
 
     # Suppress verbose failure tracebacks — per-test log files have full details.
     # Keep short one-liners (-rfE) so Jenkins Groovy can parse them for log file links.
-    # pytest-retry's verbose report is also suppressed (details are in per-test log files).
     if config.getoption("--tb") == "auto":
         config.option.tbstyle = "no"
     config.option.reportchars = "fE"
-    try:
-        from pytest_retry.retry_plugin import retry_manager
-        retry_manager.build_retry_report = lambda *args, **kwargs: None
-    except ImportError:
-        pass
 
     # Suppress paramiko and cryptography deprecation warnings
     config.addinivalue_line("filterwarnings", "ignore::DeprecationWarning:cryptography")
@@ -387,7 +369,7 @@ def pytest_runtest_protocol(item, nextitem):
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
-    """Log test duration and any failures/errors.  Track per-module failures for --retries."""
+    """Log test duration and any failures/errors."""
     outcome = yield
     report = outcome.get_result()
 
@@ -401,30 +383,6 @@ def pytest_runtest_makereport(item, call):
     if call.when == "call":
         ensure_newline()
         log.debug(f"Test execution took {report.duration:.3f}s")
-
-    # Record module-level failure for --retries skip-if-clean logic.
-    # Track ANY phase (setup / call / teardown) — a setup-phase failure shows up as
-    # ERROR in Jenkins reports but is just as much a failure for retry purposes.
-    # Restricting to report.when == "call" was missing every fixture-time error and
-    # caused the retry pass to be wrongly skipped (see Jenkins #113344).
-    if report.failed and getattr(item.config, '_module_retry_mode', False):
-        callspec = getattr(item, 'callspec', None)
-        step = callspec.params.get('__pytest_repeat_step_number', 0) if callspec else 0
-        mod = item.module.__file__
-        _module_pass_had_failure[(mod, step)] = True
-
-
-@pytest.hookimpl(tryfirst=True)
-def pytest_runtest_setup(item):
-    """Skip retry passes whose previous pass had no failures (--retries optimisation)."""
-    if not getattr(item.config, '_module_retry_mode', False):
-        return
-    callspec = getattr(item, 'callspec', None)
-    step = callspec.params.get('__pytest_repeat_step_number', 0) if callspec else 0
-    if step > 0:
-        mod = item.module.__file__
-        if not _module_pass_had_failure.get((mod, step - 1), False):
-            pytest.skip("Module retry skipped — no failures in previous pass")
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
@@ -504,8 +462,12 @@ def __pytest_repeat_step_number(request):
     them on each repeat pass — driving the device recycle between passes.
 
     Assumes ``repeat_scope='module'`` (forced in ``pytest_configure`` whenever
-    ``--count`` / ``--repeat`` / ``--retries`` ask for >1 pass).  Without parametrize
+    ``--count`` / ``--repeat`` ask for >1 pass).  Without parametrize
     (--count==1) ``request.param`` is unset and we just return 0.
+
+    Note: with native pytest-retry handling --retries, retries don't go through
+    pytest-repeat — pytest-retry tears down module fixtures directly between
+    attempts. This fixture is only relevant for --repeat / --count.
     """
     return getattr(request, 'param', 0)
 
