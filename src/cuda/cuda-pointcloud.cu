@@ -61,28 +61,20 @@ void deproject_pixel_to_point_cuda(float points[3], const struct rs2_intrinsics 
 
 __global__
 
-void kernel_deproject_depth_cuda( float * points, const rs2_intrinsics* intrin, const uint16_t * depth, float depth_scale )
+void kernel_deproject_depth_cuda( float * points, const rs2_intrinsics * intrin, const uint16_t * depth, float depth_scale )
 {
-    // Cache dimensions in registers once instead of re-reading them from global memory on every loop iteration.
-    const int width = intrin->width;
+    const int width  = intrin->width;
     const int height = intrin->height;
-    const int n = width * height;
 
-    int i = blockDim.x * blockIdx.x + threadIdx.x;
-
-    if (i >= n)
+    // One thread = one pixel; the grid is sized to the image so no stride loop is needed.
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if( x >= width || y >= height )
         return;
 
-    int stride = blockDim.x * gridDim.x;
-    int a, b;
-
-    for( int j = i; j < n; j += stride )
-    {
-        b = j / width;
-        a = j - b * width;
-        const float pixel[] = { (float)a, (float)b };
-        deproject_pixel_to_point_cuda( points + j * 3, intrin, pixel, depth_scale * depth[j] );
-    }
+    const int j = y * width + x;
+    const float pixel[] = { (float)x, (float)y };
+    deproject_pixel_to_point_cuda( points + j * 3, intrin, pixel, depth_scale * depth[j] );
 }
 
 
@@ -112,8 +104,14 @@ void rscuda::pointcloud_cuda_helper::deproject_depth_cuda( float * points, const
 
     cudaMemcpy( _d_depth.get(), depth, count * sizeof( uint16_t ), cudaMemcpyHostToDevice );
 
-    const int numBlocks = ( count + RS2_CUDA_THREADS_PER_BLOCK - 1 ) / RS2_CUDA_THREADS_PER_BLOCK;
-    kernel_deproject_depth_cuda<<< numBlocks, RS2_CUDA_THREADS_PER_BLOCK >>>( _d_points.get(), _d_intrin.get(), _d_depth.get(), depth_scale );
+    // 2D launch: warp-sized x dimension keeps a warp's lanes aligned with consecutive pixels,
+    // so depth reads stay coalesced. y dimension is sized to hit the threads-per-block target.
+    // Using 1D grid will require integer division (which is ~20-30 cycles on the GPU since there
+    // is no hardware integer divider).
+    const dim3 block( THREAD_IN_WARP, RS2_CUDA_THREADS_PER_BLOCK / THREAD_IN_WARP );
+    const dim3 grid( ( intrin.width  + block.x - 1 ) / block.x,
+                     ( intrin.height + block.y - 1 ) / block.y );
+    kernel_deproject_depth_cuda<<< grid, block >>>( _d_points.get(), _d_intrin.get(), _d_depth.get(), depth_scale );
 
     cudaMemcpy( points, _d_points.get(), count * sizeof( float ) * 3, cudaMemcpyDeviceToHost );
 }

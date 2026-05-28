@@ -21,7 +21,8 @@
 #pragma comment(lib, "cudart_static")
 #endif
 
-#define RS2_CUDA_THREADS_PER_BLOCK 256
+#define RS2_CUDA_THREADS_PER_BLOCK 256 // Conventional NVIDIA "if in doubt" default
+#define THREAD_IN_WARP 32              // CUDA warp size; constant across all current NVIDIA archs
 
 namespace rscuda
 {
