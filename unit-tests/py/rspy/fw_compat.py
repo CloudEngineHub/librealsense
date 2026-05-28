@@ -72,35 +72,47 @@ def version_from_fw_filename( path ):
 def resolve_fw_gate( rspy_device, libci_home, test_name, sn=None,
                      custom_fw_d400_path=None, custom_fw_d555_path=None ):
     """
-    Combined fw-gate check and fallback resolution for test-fw-update.
+    Combined fw-compat check and fallback resolution for test-fw-update.
+
+    Silent when the device's FW situation is compatible -- only logs when
+    there is something noteworthy (below min FW, or the gate can't decide).
 
     Returns (skip: bool, fw_override: str|None):
-      - (False, None)   -- compatible or no fallback found; run the test normally
-      - (False, <path>) -- below min FW but fallback available; use this image instead
+      - (False, None)   -- compatible / can't decide / no fallback found; run the test as-is
+      - (False, <path>) -- below min FW with a fallback available; flash this image instead
     """
     label = f'{rspy_device.name}_{sn}' if sn else rspy_device.name
-    ok, reason = is_fw_update_compatible( rspy_device,
-                                          custom_fw_d400_path=custom_fw_d400_path,
-                                          custom_fw_d555_path=custom_fw_d555_path )
-    log.d( f'[fw-gate] {label}: ok={ok} -- {reason}' )
-    if ok:
+    status, reason = evaluate_fw_compat( rspy_device,
+                                         custom_fw_d400_path=custom_fw_d400_path,
+                                         custom_fw_d555_path=custom_fw_d555_path )
+    if status == 'compatible':
         return False, None
+    if status == 'unknown':
+        log.d( f'[fw-gate] {label}: cannot decide -- {reason}; deferring to test' )
+        return False, None
+    # status == 'below_min'
     fallback = fw_fallback_image_for( rspy_device, libci_home )
     if fallback:
         if custom_fw_d400_path:
-            log.i( f'{test_name}: {label} below min FW; --custom-fw-d400 is below min too, overriding with fallback {fallback}' )
+            log.i( f'{test_name}: {label}: {reason}; --custom-fw-d400 is below min too, overriding with fallback {fallback}' )
         else:
-            log.i( f'{test_name}: {label} below min FW; using fallback {fallback}' )
+            log.i( f'{test_name}: {label}: {reason}; using fallback {fallback}' )
         return False, fallback
-    log.w( f'{test_name}: {label} below min FW with no fallback; test will fail' )
+    log.w( f'{test_name}: {label}: {reason}; no fallback registered, test will fail' )
     return False, None
 
 
-def is_fw_update_compatible( rspy_device, custom_fw_d400_path=None, custom_fw_d555_path=None ):
+def evaluate_fw_compat( rspy_device, custom_fw_d400_path=None, custom_fw_d555_path=None ):
     """
-    Decide whether test-fw-update can run against `rspy_device` with the FW image
-    that would be flashed. Returns (compatible: bool, reason: str). On any
-    can't-decide path returns True so we err on the side of letting the test run.
+    Decide whether test-fw-update's candidate FW image is compatible with
+    `rspy_device`. Returns (status, reason) where status is one of:
+
+      'compatible' -- candidate FW >= device minimum supported FW; run the test as-is.
+      'below_min'  -- candidate FW < device minimum; caller should look up a fallback
+                      image and override --custom-fw-d400.
+      'unknown'    -- the gate couldn't determine compatibility (no candidate FW found,
+                      no minimum FW reported by the device, or the API raised). Caller
+                      should run the test anyway and let it decide.
 
     `rspy_device` is the rspy.devices.Device wrapper; the underlying pyrealsense2
     device is available at `.handle`.
@@ -108,7 +120,7 @@ def is_fw_update_compatible( rspy_device, custom_fw_d400_path=None, custom_fw_d5
     try:
         import pyrealsense2 as rs
     except ImportError as e:
-        return True, f'pyrealsense2 unavailable ({e})'
+        return 'unknown', f'pyrealsense2 unavailable ({e})'
 
     handle = rspy_device.handle
     product_line = rspy_device.product_line
@@ -126,16 +138,16 @@ def is_fw_update_compatible( rspy_device, custom_fw_d400_path=None, custom_fw_d5
         candidate = handle.get_info( rs.camera_info.recommended_firmware_version )
         source = 'RECOMMENDED_FIRMWARE_VERSION'
     if not candidate:
-        return True, 'no candidate FW version available; deferring to test'
+        return 'unknown', 'no candidate FW version available'
 
     try:
         min_fw = handle.get_firmware_min_version()
     except Exception as e:
-        return True, f'get_firmware_min_version raised ({e}); deferring to test'
+        return 'unknown', f'get_firmware_min_version() raised: {e}'
 
     if not min_fw:
-        return True, f'device reports no minimum FW; deferring (candidate {candidate})'
+        return 'unknown', f'device reports no minimum FW (candidate {candidate})'
 
     if version_to_tuple( candidate ) >= version_to_tuple( min_fw ):
-        return True, f'compatible -- candidate {candidate} >= min {min_fw} (candidate from {source})'
-    return False, f'below device min FW -- candidate {candidate} < min {min_fw} (candidate from {source})'
+        return 'compatible', f'candidate {candidate} >= min {min_fw} (from {source})'
+    return 'below_min', f'candidate {candidate} < min {min_fw} (from {source})'
