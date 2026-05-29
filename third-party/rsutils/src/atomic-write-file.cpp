@@ -6,6 +6,9 @@
 #include <fstream>
 #include <cstdio>
 #include <string>
+#include <atomic>
+#include <thread>
+#include <functional>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -20,12 +23,15 @@ namespace os {
 
 static std::string make_temp_filename( const std::string & filename )
 {
+    static std::atomic< uint64_t > counter{ 0 };
     std::string temp = filename + ".";
 #ifdef _WIN32
     temp += std::to_string( GetCurrentProcessId() );
 #else
     temp += std::to_string( getpid() );
 #endif
+    temp += "." + std::to_string( std::hash< std::thread::id >{}( std::this_thread::get_id() ) );
+    temp += "." + std::to_string( counter.fetch_add( 1, std::memory_order_relaxed ) );
     temp += ".tmp";
     return temp;
 }

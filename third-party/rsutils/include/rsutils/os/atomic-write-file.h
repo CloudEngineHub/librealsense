@@ -10,7 +10,7 @@ namespace os {
 
 
 // Writes content to filename atomically via a temp file and rename.
-// The temp file is named "<filename>.<pid>.tmp"; stale copies are benign and safe to delete.
+// The temp file is named "<filename>.<pid>.<tid>.<counter>.tmp" (thread-unique); stale copies are benign and safe to delete.
 // Returns true on success, false on any failure (open, write, or rename).
 //
 bool atomic_write_file( const std::string & filename, const std::string & content );
