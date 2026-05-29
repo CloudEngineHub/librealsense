@@ -629,7 +629,7 @@ interface MetadataOverlayProps {
   fps: number
 }
 
-function MetadataOverlay({ streamType, metadata, fps }: MetadataOverlayProps) {
+export function MetadataOverlay({ streamType, metadata, fps }: MetadataOverlayProps) {
   const frameMd = metadata.frame_metadata ?? {}
   const isMotion = ['gyro', 'accel', 'motion'].includes(streamType.toLowerCase())
   return (
@@ -640,19 +640,19 @@ function MetadataOverlay({ streamType, metadata, fps }: MetadataOverlayProps) {
       <div className="px-3 py-2 border-b border-gray-700 bg-gray-900/60">
         <div className="text-gray-400 uppercase tracking-wide text-[10px] mb-1">Viewer Info</div>
         <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono">
-          <MetadataItem label="frame_timestamp" value={metadata.timestamp} />
-          <MetadataItem label="clock_domain" value={metadata.clock_domain} />
-          <MetadataItem label="frame_number" value={metadata.frame_number} />
-          <MetadataItem label="pixel_format" value={metadata.pixel_format} />
-          <MetadataItem label="hardware_size" value={!isMotion ? resolutionFrom(metadata.hardware_width, metadata.hardware_height) : undefined} />
-          <MetadataItem label="display_size" value={!isMotion ? resolutionFrom(metadata.width, metadata.height) : undefined} />
-          <MetadataItem label="hardware_fps" value={metadata.hardware_fps} />
-          <MetadataItem label="viewer_fps" value={fps} />
+          <MetadataItem label="Frame Timestamp" value={metadata.timestamp} />
+          <MetadataItem label="Clock Domain" value={metadata.clock_domain} />
+          <MetadataItem label="Frame Number" value={metadata.frame_number} />
+          <MetadataItem label="Pixel Format" value={metadata.pixel_format} />
+          <MetadataItem label="Hardware Size" value={!isMotion ? resolutionFrom(metadata.hardware_width, metadata.hardware_height) : undefined} />
+          <MetadataItem label="Display Size" value={!isMotion ? resolutionFrom(metadata.width, metadata.height) : undefined} />
+          <MetadataItem label="Hardware FPS" value={metadata.hardware_fps} />
+          <MetadataItem label="Viewer FPS" value={fps} />
         </div>
       </div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 p-3 font-mono">
         {Object.entries(frameMd).map(([k, v]) => (
-          <MetadataItem key={k} label={k} value={v} />
+          <MetadataItem key={k} label={lessScreamy(k)} value={v} />
         ))}
       </div>
     </div>
@@ -673,9 +673,13 @@ interface MetadataPanelProps {
   buttonClassName?: string
 }
 
-function MetadataPanel({ isStreaming, metadata, streamType, fps, show, onToggle, buttonClassName = '' }: MetadataPanelProps) {
+export function MetadataPanel({ isStreaming, metadata, streamType, fps, show, onToggle, buttonClassName = '' }: MetadataPanelProps) {
   useEffect(() => { if (!isStreaming) onToggle(false) }, [isStreaming, onToggle])
-  const hasMetadata = isStreaming && !!metadata?.frame_metadata && Object.keys(metadata.frame_metadata).length > 0
+  const hasMetadata = isStreaming && !!metadata && (
+    metadata.frame_number !== undefined ||
+    metadata.timestamp !== undefined ||
+    Object.keys(metadata.frame_metadata ?? {}).length > 0
+  )
   if (!hasMetadata) return null
   return (
     <>
@@ -692,7 +696,12 @@ function MetadataPanel({ isStreaming, metadata, streamType, fps, show, onToggle,
   )
 }
 
-function MetadataItem({ label, value }: { label: string; value: ReactNode }) {
+// Mirrors the SDK's rsutils::string::make_less_screamy: "ACTUAL_FPS" -> "Actual Fps".
+export function lessScreamy(key: string): string {
+  return key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+}
+
+export function MetadataItem({ label, value }: { label: string; value: ReactNode }) {
   if (value === undefined || value === null) return null
   return (
     <div className="flex justify-between border-b border-gray-800/50 py-0.5">
