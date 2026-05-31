@@ -124,11 +124,14 @@ class MetadataSocketServer:
 
     def start_broadcast(self, device_id: str):
         """Starts the metadata broadcast loop as a background thread."""
-        if self._is_broadcasting:
-            return
-
         if not device_id:
             raise ValueError("A target device_id must be provided.")
+
+        # If already broadcasting for a different device, switch targets gracefully.
+        if self._is_broadcasting:
+            if self._target_device_id == device_id:
+                return
+            self.stop_broadcast()
 
         self._target_device_id = device_id
         self._is_broadcasting = True
