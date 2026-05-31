@@ -319,25 +319,29 @@ def test_multi_stream_operation(test_devices):
       Phase 1: depth + IR only (no color)
       Phase 2: depth + IR + color
     """
-    device_list, ctx = test_devices
+    rs.log_to_file(rs.log_severity.debug, f"multi_dev_streaming_log_{time.strftime('%Y%m%d_%H%M%S')}.txt")
+    try:
+        device_list, ctx = test_devices
 
-    log.info("=" * 80)
-    log.info(f"Testing multi-stream operation on {len(device_list)} devices:")
-    for i, dev in enumerate(device_list, 1):
-        sn = dev.get_info(rs.camera_info.serial_number)
-        name = dev.get_info(rs.camera_info.name) if dev.supports(rs.camera_info.name) else "Unknown"
-        log.info(f"  Device {i}: {name} (SN: {sn})")
-    log.info("=" * 80)
+        log.info("=" * 80)
+        log.info(f"Testing multi-stream operation on {len(device_list)} devices:")
+        for i, dev in enumerate(device_list, 1):
+            sn = dev.get_info(rs.camera_info.serial_number)
+            name = dev.get_info(rs.camera_info.name) if dev.supports(rs.camera_info.name) else "Unknown"
+            log.info(f"  Device {i}: {name} (SN: {sn})")
+        log.info("=" * 80)
 
-    log.info("Finding common multi-stream configuration...")
-    all_stream_configs = get_common_multi_stream_config(*device_list)
+        log.info("Finding common multi-stream configuration...")
+        all_stream_configs = get_common_multi_stream_config(*device_list)
 
-    if len(all_stream_configs) < 2:
-        pytest.fail(f"At least 2 stream types needed for multi-stream test, but found {len(all_stream_configs)}")
+        if len(all_stream_configs) < 2:
+            pytest.fail(f"At least 2 stream types needed for multi-stream test, but found {len(all_stream_configs)}")
 
-    no_color_configs = [c for c in all_stream_configs if c[0] != rs.stream.color]
-    if len(no_color_configs) < 2:
-        pytest.fail(f"At least 2 non-color streams needed for phase 1, but found {len(no_color_configs)}")
+        no_color_configs = [c for c in all_stream_configs if c[0] != rs.stream.color]
+        if len(no_color_configs) < 2:
+            pytest.fail(f"At least 2 non-color streams needed for phase 1, but found {len(no_color_configs)}")
 
-    run_phase("PHASE 1 (no color)", device_list, no_color_configs)
-    run_phase("PHASE 2 (with color)", device_list, all_stream_configs)
+        run_phase("PHASE 1 (no color)", device_list, no_color_configs)
+        run_phase("PHASE 2 (with color)", device_list, all_stream_configs)
+    finally:
+        rs.reset_logger()
