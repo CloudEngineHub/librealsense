@@ -35,6 +35,7 @@ EPSILON = 0.5         # half of PIXEL_CORRECTION tolerance
 DIFF_THRESHOLD = 0.001  # minimum change expected after OCC calibration
 HEALTH_FACTOR_THRESHOLD_AFTER_MODIFICATION = 3.0
 FILL_RATE_CONVERGENCE_TOLERANCE = 0.02  # 2% slack for frame-to-frame fill rate noise
+
 def on_chip_calibration_json(occ_json_file, host_assistance):
     occ_json = None
     if occ_json_file is not None:
@@ -166,7 +167,7 @@ def run_advanced_occ_calibration_test(host_assistance, config, pipeline, calib_d
         dist_from_modified = abs(final_axis_val - modified_axis_val)
         log.info(f"  ppy distances: from_base={dist_from_original:.6f} from_modified={dist_from_modified:.6f}")
 
-        # Measure average depth after OCC correction
+        # Measure depth fill rate after OCC correction
         post_fill_rate = measure_depth_fill_rate(config, pipeline, width=image_width, height=image_height, fps=fps)
         if post_fill_rate is not None:
             log.info(f"Fill rate after OCC: {post_fill_rate*100:.1f}%")
@@ -174,17 +175,14 @@ def run_advanced_occ_calibration_test(host_assistance, config, pipeline, calib_d
             log.error("Fill rate after OCC unavailable")
             pytest.fail()
 
-        # Fill rate convergence assertion: post-OCC fill rate must be closer to baseline than modified fill rate was
+        # Fill rate assertion: post-OCC fill rate must be at least as good as the perturbed fill rate
         if (baseline_fill_rate is not None and modified_fill_rate is not None and post_fill_rate is not None):
-            dist_post = abs(post_fill_rate - baseline_fill_rate)
-            dist_modified = abs(modified_fill_rate - baseline_fill_rate)
-            log.info(f"Fill rate distance to baseline: modified={dist_modified*100:.1f}% post={dist_post*100:.1f}% (baseline={baseline_fill_rate*100:.1f}%)")
-            if dist_post > dist_modified + FILL_RATE_CONVERGENCE_TOLERANCE:
-                log.error("Post-OCC fill rate did not converge toward baseline fill rate")
+            log.info(f"Fill rates: baseline={baseline_fill_rate*100:.1f}% modified={modified_fill_rate*100:.1f}% post={post_fill_rate*100:.1f}%")
+            if post_fill_rate - FILL_RATE_CONVERGENCE_TOLERANCE <= modified_fill_rate:
+                log.error("Post-OCC fill rate did not improve over perturbed fill rate")
                 pytest.fail()
             else:
-                improvement = dist_modified - dist_post
-                log.info(f"Fill rate converged toward baseline (improvement={improvement*100:.1f}%)")
+                log.info(f"Fill rate improved after OCC (improvement={( post_fill_rate - modified_fill_rate)*100:.1f}%)")
 
         if abs(final_axis_val - modified_axis_val) <= DIFF_THRESHOLD:
             log.error(f"OCC left ppy unchanged (within DIFF_THRESHOLD={DIFF_THRESHOLD}); failing")            
