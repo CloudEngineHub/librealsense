@@ -1,8 +1,11 @@
 // License: Apache 2.0. See LICENSE file in root directory.
 // Copyright(c) 2026 RealSense, Inc. All Rights Reserved.
 
-#include "viewer-test-helpers.h"
-#include "rs-config.h"
+//#cmake:add-file ../../common/rs-config.cpp
+
+#include <unit-tests/catch.h>
+#include <common/rs-config.h>
+#include <rsutils/os/special-folder.h>
 
 #include <string>
 #include <cstdio>
@@ -17,18 +20,6 @@
 
 namespace {
 
-static std::string get_temp_dir()
-{
-#ifdef _WIN32
-    char buf[MAX_PATH + 1] = {};
-    GetTempPathA( sizeof( buf ), buf );
-    return std::string( buf );
-#else
-    const char * d = std::getenv( "TMPDIR" );
-    return ( d && *d ) ? std::string( d ) + "/" : "/tmp/";
-#endif
-}
-
 static std::string make_test_config_path()
 {
 #ifdef _WIN32
@@ -36,7 +27,8 @@ static std::string make_test_config_path()
 #else
     std::string pid = std::to_string( getpid() );
 #endif
-    return get_temp_dir() + "rs_config_test_" + pid + ".json";
+    auto temp_dir = rsutils::os::get_special_folder( rsutils::os::special_folder::temp_folder );
+    return temp_dir + "rs_config_test_" + pid + ".json";
 }
 
 // RAII wrapper: removes the file at path on destruction
@@ -57,9 +49,8 @@ struct scoped_file
 
 // Verify that a value written via set() is persisted to disk and correctly
 // loaded by a fresh config_file instance.
-VIEWER_TEST( "config", "regular_update" )
+TEST_CASE( "config/regular_update", "[common]" )
 {
-    (void)test;
     std::string path = make_test_config_path();
     scoped_file guard( path );
 
@@ -70,6 +61,6 @@ VIEWER_TEST( "config", "regular_update" )
     }
 
     rs2::config_file reloaded( path );
-    IM_CHECK( reloaded.contains( "greeting" ) );
-    IM_CHECK( reloaded.get( "greeting", "" ) == std::string( "hello_world" ) );
+    CHECK( reloaded.contains( "greeting" ) );
+    CHECK( reloaded.get( "greeting", "" ) == std::string( "hello_world" ) );
 }
