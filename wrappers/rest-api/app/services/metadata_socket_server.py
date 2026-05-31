@@ -78,10 +78,16 @@ class MetadataSocketServer:
                             and "point_cloud" in metadata
                             and "vertices" in metadata["point_cloud"]
                         ):
+                            # get_latest_metadata returns the cached dict by reference;
+                            # copy before encoding/dropping to avoid corrupting it for the next read.
+                            metadata = {**metadata}
                             if send_point_cloud:
-                                metadata["point_cloud"]["vertices"] = base64.b64encode(
-                                    metadata["point_cloud"]["vertices"].tobytes()
-                                ).decode("utf-8")
+                                metadata["point_cloud"] = {
+                                    **metadata["point_cloud"],
+                                    "vertices": base64.b64encode(
+                                        metadata["point_cloud"]["vertices"].tobytes()
+                                    ).decode("utf-8"),
+                                }
                             else:
                                 del metadata["point_cloud"]
                         all_metadata[stream_type] = metadata

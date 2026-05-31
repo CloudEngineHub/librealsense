@@ -1713,6 +1713,20 @@ class RealSenseManager:
                 continue
         return attrs
 
+    def _build_point_cloud_metadata(self, depth_frame) -> Optional[Dict]:
+        """Compute decimated point-cloud vertices from a depth frame, ready for serialization.
+
+        Returns None if calculate() yields nothing. Used by both the pipeline-mode
+        frame collector and the sensor-mode frame processor.
+        """
+        points = self.pc.calculate(depth_frame)
+        if not points:
+            return None
+        verts = np.asanyarray(points.get_vertices()).view(np.float32).reshape(-1, 3)
+        verts = verts[verts[:, 2] >= 0.03]  # drop invalid near-camera points
+        verts = verts[::4]  # decimate to keep payload under Socket.IO buffer cap
+        return {"vertices": verts, "texture_coordinates": []}
+
     def _collect_frames(self, device_id: str, align_processor=None):
         """Thread function to collect frames from the pipeline"""
         logging.debug("[INFO] Frame collection thread started for device %s", device_id)
@@ -1754,8 +1768,7 @@ class RealSenseManager:
                         try:
                             frame = None
                             frame_data = None
-                            points = None
-                            
+
                             # Use the rs_stream enum directly for comparison
                             if rs_stream == rs.stream.depth:
                                 frame_data = frames.get_depth_frame()
@@ -1766,8 +1779,6 @@ class RealSenseManager:
                                     self.depth_frames[device_id] = frame_data
                                     colorized = colorizer.colorize(frame_data)
                                     frame = np.asanyarray(colorized.get_data())
-                                    if self.is_pointcloud_enabled.get(device_id, False):
-                                        points = self.pc.calculate(frame_data)
                             elif rs_stream == rs.stream.color:
                                 frame_data = frames.get_color_frame()
                                 if frame_data:
@@ -1816,12 +1827,10 @@ class RealSenseManager:
                                 if motion_json_data:
                                     metadata["motion_data"] = motion_json_data
 
-                            if points:
-                                v, t = points.get_vertices(), points.get_texture_coordinates()
-                                verts = np.asanyarray(v).view(np.float32).reshape(-1, 3)
-                                verts = verts[verts[:, 2] >= 0.03]  # Filter out z < 0.03
-                                verts = verts[::4]  # decimate to keep payload under Socket.IO buffer cap
-                                metadata["point_cloud"] = {"vertices": verts, "texture_coordinates": []}
+                            if rs_stream == rs.stream.depth and self.is_pointcloud_enabled.get(device_id, False):
+                                pc_meta = self._build_point_cloud_metadata(frame_data)
+                                if pc_meta:
+                                    metadata["point_cloud"] = pc_meta
 
                             # Store processed frame and metadata
                             processed_frames[active_stream] = frame
@@ -2125,12 +2134,9 @@ class RealSenseManager:
             info_source = depth_frame
 
             if self.is_pointcloud_enabled.get(device_id, False):
-                points = self.pc.calculate(depth_frame)
-                if points:
-                    verts = np.asanyarray(points.get_vertices()).view(np.float32).reshape(-1, 3)
-                    verts = verts[verts[:, 2] >= 0.03]
-                    verts = verts[::4]  # decimate to keep payload under Socket.IO buffer cap
-                    metadata["point_cloud"] = {"vertices": verts, "texture_coordinates": []}
+                pc_meta = self._build_point_cloud_metadata(depth_frame)
+                if pc_meta:
+                    metadata["point_cloud"] = pc_meta
 
         elif "color" in frame_stream_name:
             color_frame = frame.as_video_frame()

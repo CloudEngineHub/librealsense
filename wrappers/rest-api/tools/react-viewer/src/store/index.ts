@@ -171,7 +171,7 @@ interface AppState {
 
   // UI state
   viewMode: ViewMode
-  setViewMode: (mode: ViewMode) => void
+  setViewMode: (mode: ViewMode) => Promise<void>
   isIMUViewerExpanded: boolean
   toggleIMUViewer: () => void
 
@@ -1173,25 +1173,29 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   // UI state
   viewMode: '2d',
-  setViewMode: (mode) => {
+  setViewMode: async (mode) => {
     const prev = get().viewMode
     if (prev === mode) return
     set({ viewMode: mode })
 
     const activeDevices = Object.values(get().deviceStates).filter(ds => ds.isActive)
-    if (mode === '3d') {
-      for (const ds of activeDevices) {
-        apiClient
-          .enablePointCloud(ds.device.device_id)
-          .catch(err => console.error(`enablePointCloud(${ds.device.device_id}) failed:`, err))
+    try {
+      if (mode === '3d') {
+        await Promise.all(
+          activeDevices.map(ds => apiClient.enablePointCloud(ds.device.device_id))
+        )
+      } else {
+        await Promise.all(
+          activeDevices.map(ds => apiClient.disablePointCloud(ds.device.device_id))
+        )
+        set({ pointCloudVertices: null })
       }
-    } else {
-      for (const ds of activeDevices) {
-        apiClient
-          .disablePointCloud(ds.device.device_id)
-          .catch(err => console.error(`disablePointCloud(${ds.device.device_id}) failed:`, err))
-      }
-      set({ pointCloudVertices: null })
+    } catch (err) {
+      set({
+        error: `Failed to ${mode === '3d' ? 'enable' : 'disable'} point cloud: ${
+          err instanceof Error ? err.message : 'Unknown error'
+        }`,
+      })
     }
   },
   isIMUViewerExpanded: false,
