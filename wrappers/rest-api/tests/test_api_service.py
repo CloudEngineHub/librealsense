@@ -476,6 +476,26 @@ class TestRealSenseAPI:
         assert response.status_code == 400
         assert "does not support" in response.json()["detail"].lower()
 
+    def test_hwm_command_firmware_error(self, setup_mock_managers):
+        """When the firmware command itself fails the endpoint returns 500."""
+        rs_manager = setup_mock_managers["rs_manager"]
+        original = rs_manager.send_hwm_command
+
+        def _raise(*args, **kwargs):
+            from app.core.errors import RealSenseError
+            raise RealSenseError(status_code=500, detail="HWM command failed: firmware rejected")
+
+        rs_manager.send_hwm_command = _raise
+        try:
+            response = client.post(
+                "/api/v1/devices/device1/hwm",
+                json={"opcode": 0xA6},
+            )
+            assert response.status_code == 500
+            assert "firmware" in response.json()["detail"].lower()
+        finally:
+            rs_manager.send_hwm_command = original
+
     @pytest.mark.asyncio
     async def test_close_webrtc_session(self, setup_mock_managers):
         # First create offer

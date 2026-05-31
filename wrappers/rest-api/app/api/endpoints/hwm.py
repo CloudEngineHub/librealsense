@@ -16,12 +16,11 @@ router = APIRouter()
 async def send_hwm_command(
     device_id: str,
     request: HwmRequest,
-    rs_manager: RealSenseManager = Depends(get_realsense_manager),
-    #user: dict = Depends(get_current_user) -> enable this if security is needed
+    rs_manager: RealSenseManager = Depends(get_realsense_manager)
 ):
     """
     Send a hardware monitor (HWM) command to a specific RealSense device.
-    
+
     Requires the device to support the ``RS2_EXTENSION_DEBUG`` extension.
     Returns 400 if the device does not support hardware monitor commands.
     """
