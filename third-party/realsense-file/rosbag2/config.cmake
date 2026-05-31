@@ -76,6 +76,7 @@ if(UNIX AND NOT APPLE)
     # (void*(*)[1]) to backtrace() which expects void**; gcc >= 14 errors on it,
     # wrongly failing the check on glibc. Probe inline with the correct argument.
     include(CheckCSourceCompiles)
+    unset(USES_GLIBC CACHE)  # force re-probe; old broken probe may have cached FALSE
     check_c_source_compiles("
         #include <execinfo.h>
         int main() {
