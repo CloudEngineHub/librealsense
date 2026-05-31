@@ -156,7 +156,21 @@ class RealSenseManager:
 
     def refresh_devices(self) -> List[DeviceInfo]:
         """Refresh the list of connected devices"""
+        # Skip enumeration while a firmware update is running. A concurrent
+        # call to self.ctx.devices/query_devices() invalidates the rs.device
+        # handles held by the FW-update thread (notably the DFU update_dev
+        # returned by _wait_for_dfu_device), causing the SDK to throw
+        # 'null pointer passed for argument "device"' on the subsequent
+        # update_dev.update(...) call. Return the cached snapshot instead;
+        # update_firmware_from_bytes runs a real refresh once it finishes.
         with self.lock:
+            if self._fw_updates_in_progress:
+                logging.debug(
+                    "refresh_devices: skipping ctx enumeration — FW update(s) in progress: %s",
+                    self._fw_updates_in_progress,
+                )
+                return list(self.device_infos.values())
+
             # Clear existing devices (that aren't streaming)
             for device_id in list(self.devices.keys()):
                 if device_id not in self.pipelines:
@@ -284,10 +298,15 @@ class RealSenseManager:
 
     @staticmethod
     def _is_update_device(dev: rs.device) -> bool:
-        """True if the device exposes the DFU update interface."""
+        """True if the device exposes the DFU update interface.
+
+        Some pyrealsense2 builds return an empty rs.update_device wrapper
+        (truthy Python object, null underlying pointer) instead of throwing
+        for a non-DFU device. Validate the wrapper via bool() to catch that.
+        """
         try:
-            rs.update_device(dev)
-            return True
+            up = rs.update_device(dev)
+            return bool(up)
         except Exception:
             return False
 
@@ -303,9 +322,14 @@ class RealSenseManager:
             self._ensure_fw_update_allowed(device_id)
             fw_image = self._materialize_fw_image(fw_bytes)
 
-            target_dev = self.devices.get(device_id)
-            if not target_dev:
-                raise RealSenseError(status_code=404, detail="Device not found for firmware update")
+            # Re-fetch the device handle directly from the SDK context. The cached
+            # `self.devices[device_id]` Python wrapper can outlive its underlying
+            # C++ device pointer when refresh_devices() runs concurrently (the
+            # 5-second polling loop) or when the device re-enumerates between
+            # the GET /devices call and this POST, producing a wrapper that is
+            # still truthy but whose C++ pointer is null. Passing such a handle
+            # to rs.updatable() raises `null pointer passed for argument "device"`.
+            target_dev = self._resolve_live_device(device_id)
             firmware_update_id = self._resolve_firmware_update_id(target_dev, device_id)
 
             progress_holder, on_progress = self._make_fw_progress_callback(device_id)
@@ -319,6 +343,11 @@ class RealSenseManager:
                 update_dev = self._enter_dfu_and_get_update_dev(
                     target_dev, fw_image, device_id, firmware_update_id,
                 )
+                if not update_dev:
+                    raise RealSenseError(
+                        status_code=500,
+                        detail="Could not obtain a valid DFU device handle for the update",
+                    )
 
                 logging.info("Starting firmware update on DFU device...")
                 update_dev.update(fw_image, on_progress)
@@ -342,7 +371,7 @@ class RealSenseManager:
             except RealSenseError:
                 raise
             except Exception as exc:
-                logging.error("Firmware update failed for %s: %s", device_id, exc)
+                logging.exception("Firmware update failed for %s", device_id)
                 self._emit_socket_event(
                     f"firmware_update_failed_{device_id}",
                     {"device_id": device_id, "error": str(exc)},
@@ -390,6 +419,28 @@ class RealSenseManager:
             if device_id in self._fw_updates_in_progress:
                 raise RealSenseError(status_code=409, detail="Firmware update already in progress")
             self._fw_updates_in_progress.add(device_id)
+
+    def _resolve_live_device(self, device_id: str) -> rs.device:
+        """Return an rs.device for ``device_id`` enumerated fresh from self.ctx.
+
+        Avoids using ``self.devices[device_id]`` directly: that cached wrapper
+        can be invalidated underneath by a concurrent refresh_devices() (the
+        polling loop), leaving a truthy Python object backed by a null C++
+        pointer. Raises 404 if the device is no longer visible.
+        """
+        for dev in self.ctx.query_devices():
+            try:
+                if not dev.supports(rs.camera_info.serial_number):
+                    continue
+                if dev.get_info(rs.camera_info.serial_number) == device_id:
+                    # Refresh the cache so downstream callers (refresh_devices)
+                    # observe the same live handle.
+                    with self.lock:
+                        self.devices[device_id] = dev
+                    return dev
+            except RuntimeError:
+                continue
+        raise RealSenseError(status_code=404, detail=f"Device {device_id} not found")
 
     def _ensure_fw_update_allowed(self, device_id: str) -> None:
         """Reject the update if the device is unknown or if anything is streaming."""
@@ -471,8 +522,13 @@ class RealSenseManager:
         """
         try:
             update_dev = rs.update_device(target_dev)
-            logging.info("Device is already in DFU mode")
-            return update_dev
+            # Some pyrealsense2 builds return an empty wrapper for non-DFU
+            # devices instead of throwing. bool() returns False on the empty
+            # wrapper, so treat that as "not in DFU yet" and fall through to
+            # the enter_update_state path below.
+            if update_dev:
+                logging.info("Device is already in DFU mode")
+                return update_dev
         except Exception:
             pass
 
@@ -518,6 +574,11 @@ class RealSenseManager:
                     try:
                         candidate = rs.update_device(dev)
                     except Exception:
+                        continue
+                    # Empty wrapper from a non-DFU device (some pyrealsense2
+                    # builds return one rather than throwing). Skip — calling
+                    # update() on it later raises 'null pointer for "device"'.
+                    if not candidate:
                         continue
                     try:
                         if dev.supports(rs.camera_info.firmware_update_id):
