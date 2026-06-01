@@ -777,7 +777,21 @@ class TestRealSenseAPIIntegration:
         retrieved_option = response.json()
         assert retrieved_option["option_id"] == option_id
 
-    def test_hwm_command_rs(self):
+    @staticmethod
+    def _parse_gvd_d400(data):
+        """Parse the first 6 fields of a D400-series GVD response."""
+        if len(data) < 70:
+            return {"raw": data}
+        return {
+            "version":           data[0],
+            "gvd_version":       data[2],
+            "fw_version":        f"{data[15]}.{data[14]}.{data[13]}.{data[12]}",
+            "is_camera_locked":  bool(data[25]),
+            "module_serial":     "".join(f"{b:02X}" for b in data[48:54]),
+            "module_asic_serial":"".join(f"{b:02X}" for b in data[64:70]),
+        }
+
+    def test_hwm_command_gvd_rs(self):
         """Test sending a hardware monitor command (GVD opcode) to a real device."""
         import importlib
         import sys
@@ -806,13 +820,14 @@ class TestRealSenseAPIIntegration:
             f"/api/v1/devices/{device_id}/hwm",
             json={"opcode": 0x10},
         )
-        log.info("HWM response: status=%s body=%s", hwm_response.status_code, hwm_response.json())
+        body = hwm_response.json()
+        parsed = self._parse_gvd_d400(body.get("response", []))
+        log.info("HWM response: status=%s parsed=%s", hwm_response.status_code, parsed)
 
         if hwm_response.status_code == 400:
             pytest.skip(f"Device {device_id} does not support hardware monitor commands")
 
         assert hwm_response.status_code == 200
-        body = hwm_response.json()
         assert body["device_id"] == device_id
         assert isinstance(body["response"], list)
         assert len(body["response"]) > 0
