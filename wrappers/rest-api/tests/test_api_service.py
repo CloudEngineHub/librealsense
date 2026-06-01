@@ -1,6 +1,7 @@
 # License: Apache 2.0. See LICENSE file in root directory.
 # Copyright(c) 2026 RealSense, Inc. All Rights Reserved.
 
+import logging
 import pytest
 import numpy as np
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -10,6 +11,8 @@ from .setup_fake_devices import setup_fake_devices
 from .mock_dependencies import patch_dependencies, DummyOfferStat
 from .pyrealsense_mock import camera_info
 from main import app
+
+log = logging.getLogger(__name__)
 
 # Create test client
 client = TestClient(app)
@@ -796,12 +799,14 @@ class TestRealSenseAPIIntegration:
             pytest.skip("No RealSense devices connected")
 
         device_id = devices[0]["device_id"]
+        log.info("Testing HWM command on device: %s", device_id)
 
         # GVD (Get Version and Date) is opcode 0x10 — safe read-only command
         hwm_response = real_client.post(
             f"/api/v1/devices/{device_id}/hwm",
             json={"opcode": 0x10},
         )
+        log.info("HWM response: status=%s body=%s", hwm_response.status_code, hwm_response.json())
 
         if hwm_response.status_code == 400:
             pytest.skip(f"Device {device_id} does not support hardware monitor commands")

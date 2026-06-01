@@ -33,7 +33,7 @@ def test_rest_api_wrapper(module_device_setup):
         existing = env.get("PYTHONPATH", "")
         env["PYTHONPATH"] = pyrs_dir + os.pathsep + existing if existing else pyrs_dir
     p = subprocess.run(
-        [sys.executable, "-m", "pytest", rest_api_test],
+        [sys.executable, "-m", "pytest", "-v", "--log-cli-level=DEBUG", rest_api_test],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         universal_newlines=True,
