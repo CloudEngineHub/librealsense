@@ -590,23 +590,43 @@ def test_context(module_device_setup):
     return ctx
 
 
+def _select_target_device(devices_list, module_device_setup):
+    """
+    Return the device matching the SN yielded by module_device_setup. Falls back to
+    devices_list[0] only when the test has no device parametrization (e.g. tests
+    without a device() marker). On CI rigs without a hub -- e.g. Jetson with D457 on
+    MIPI and D436 on USB -- both devices stay visible regardless of which one was
+    "enabled", so the fixture must filter by SN rather than pick devices_list[0].
+    """
+    target_sn = module_device_setup if isinstance(module_device_setup, str) else None
+    if target_sn:
+        for d in devices_list:
+            if d.supports(rs.camera_info.serial_number) \
+               and d.get_info(rs.camera_info.serial_number) == target_sn:
+                return d
+        visible = [d.get_info(rs.camera_info.serial_number)
+                   for d in devices_list if d.supports(rs.camera_info.serial_number)]
+        pytest.fail(f"Target device {target_sn} not visible in context (visible: {visible})")
+    return devices_list[0]
+
+
 @pytest.fixture(scope="module")
-def test_device(test_context):
-    """Return (device, context) for the first visible device, or fail if none found."""
+def test_device(test_context, module_device_setup):
+    """Return (device, context) for the test's target device, or fail if none found."""
     devices_list = list(test_context.devices)
     if not devices_list:
         pytest.fail("No device available for test")
 
-    dev = devices_list[0]
+    dev = _select_target_device(devices_list, module_device_setup)
     log.debug(f"Test using device: {dev.get_info(rs.camera_info.name) if dev.supports(rs.camera_info.name) else 'Unknown'}")
 
     return dev, test_context
 
 
 @pytest.fixture
-def function_scoped_device(test_context):
+def function_scoped_device(test_context, module_device_setup):
     """Function-scoped: re-query the module-scoped ``test_context`` and return a
-    *fresh* device wrapper for the first visible device.  Use this in tests that
+    *fresh* device wrapper for the test's target device.  Use this in tests that
     mutate persistent device state (e.g. HDR sequencer overrides in
     ``pytest-hdr-long.py``) and need each test to start from a new device object,
     even though the underlying ``rs.context()`` is shared across the module.
@@ -619,7 +639,7 @@ def function_scoped_device(test_context):
     if not devices_list:
         pytest.fail("No device available for test")
 
-    dev = devices_list[0]
+    dev = _select_target_device(devices_list, module_device_setup)
     log.debug(f"Test using fresh device handle: " f"{dev.get_info(rs.camera_info.name) if dev.supports(rs.camera_info.name) else 'Unknown'}")
 
     return dev
