@@ -44,5 +44,5 @@ def test_rest_api_wrapper(module_device_setup):
     if p.returncode != 0:
         log.error("Subprocess failed (rc=%s):\n%s", p.returncode, p.stdout)
     else:
-        log.debug(p.stdout)
+        log.info(p.stdout)
     assert p.returncode == 0
