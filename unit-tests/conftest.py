@@ -598,6 +598,15 @@ def _select_target_device(devices_list, module_device_setup):
     MIPI and D436 on USB -- both devices stay visible regardless of which one was
     "enabled", so the fixture must filter by SN rather than pick devices_list[0].
     """
+    if isinstance(module_device_setup, list):
+        # Multi-device marker (e.g. device("D400*", "D400*")) -- the test should use
+        # the test_devices (plural) fixture, not test_device. Falling back to the first
+        # device to preserve pre-PR behavior, but warn so the misuse is visible in CI.
+        log.warning(
+            "test_device/function_scoped_device fixture invoked with a multi-device marker; "
+            "use test_devices instead. Falling back to devices_list[0]."
+        )
+        return devices_list[0]
     target_sn = module_device_setup if isinstance(module_device_setup, str) else None
     if target_sn:
         for d in devices_list:
@@ -640,7 +649,7 @@ def function_scoped_device(test_context, module_device_setup):
         pytest.fail("No device available for test")
 
     dev = _select_target_device(devices_list, module_device_setup)
-    log.debug(f"Test using fresh device handle: " f"{dev.get_info(rs.camera_info.name) if dev.supports(rs.camera_info.name) else 'Unknown'}")
+    log.debug(f"Test using fresh device handle: {dev.get_info(rs.camera_info.name) if dev.supports(rs.camera_info.name) else 'Unknown'}")
 
     return dev
 
