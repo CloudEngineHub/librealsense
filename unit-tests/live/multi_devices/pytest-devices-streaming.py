@@ -15,6 +15,7 @@ import pytest
 import pyrealsense2 as rs
 from pytest_check import check
 from rspy.pytest.device_helpers import is_jetson_platform
+import os
 import time
 from collections import defaultdict
 import logging
@@ -312,14 +313,18 @@ def run_phase(phase_label, device_list, stream_configs):
 
 
 @pytest.mark.skip(reason="Multi-stream test skipped until depth-drops issue on Windows is stable")
-def test_multi_stream_operation(test_devices):
+def test_multi_stream_operation(test_devices, request):
     """Simultaneous multi-stream operation on multiple devices.
 
     Runs in two phases to isolate whether color streaming contributes to depth drops:
       Phase 1: depth + IR only (no color)
       Phase 2: depth + IR + color
     """
-    rs.log_to_file(rs.log_severity.debug, f"multi_dev_streaming_log_{time.strftime('%Y%m%d_%H%M%S')}.txt")
+    # Write rs debug log into pytest's per-test log directory so Jenkins archives it
+    # alongside the standard per-test logs (workspace is wiped at the start of each job).
+    logdir = getattr(request.config, '_test_logdir', os.getcwd())
+    log_filename = os.path.join(logdir, f"pytest-live-multi_devices-devices-streaming-rs-debug_{time.strftime('%Y%m%d_%H%M%S')}.log")
+    rs.log_to_file(rs.log_severity.debug, log_filename)
     try:
         device_list, ctx = test_devices
 
