@@ -316,6 +316,9 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "device_type_exclude(type): skip test if device connection type matches (e.g., GMSL, USB, DDS)"
     )
+    config.addinivalue_line(
+        "markers", "dds: test requires a DDS-enabled build (selected by --tag dds / -m dds)"
+    )
 
     # Configure standard logging with format matching legacy rspy.log output
     configure_logging(config, _debug_requested)
