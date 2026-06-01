@@ -783,12 +783,12 @@ class TestRealSenseAPIIntegration:
         if len(data) < 70:
             return {"raw": data}
         return {
-            "version":           data[0],
-            "gvd_version":       data[2],
-            "fw_version":        f"{data[15]}.{data[14]}.{data[13]}.{data[12]}",
-            "is_camera_locked":  bool(data[25]),
-            "module_serial":     "".join(f"{b:02X}" for b in data[48:54]),
-            "module_asic_serial":"".join(f"{b:02X}" for b in data[64:70]),
+            "version":           data[4],
+            "gvd_version":       data[6],
+            "fw_version":        f"{data[19]}.{data[18]}.{data[17]}.{data[16]}",
+            "is_camera_locked":  bool(data[29]),
+            "module_serial":     "".join(f"{b:02X}" for b in data[52:58]),
+            "module_asic_serial":"".join(f"{b:02X}" for b in data[68:74]),
         }
 
     def test_hwm_command_gvd_rs(self):
