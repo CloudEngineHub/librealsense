@@ -349,7 +349,7 @@ int main(int argc, char** argv) try
     if( format_arg.isSet() )
         settings["format-conversion"] = format_arg.getValue();
 
-    settings["dds"] = { { "enabled", show_dds } };
+    settings["dds"]["enabled"] = show_dds;
 
     context ctx( settings.dump() );
     
