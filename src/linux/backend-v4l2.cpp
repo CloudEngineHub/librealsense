@@ -2339,9 +2339,15 @@ namespace librealsense
             // apply it, so the stream brightness matches the reported exposure (as done on Windows).
             if (opt == RS2_OPTION_ENABLE_AUTO_EXPOSURE && value == 0)
             {
+                LOG_DEBUG("Re-applying manual exposure " << exposure << " after AE disable (v4l_uvc_device)");
                 int32_t exposure = 0;
                 if (get_pu(RS2_OPTION_EXPOSURE, exposure))
-                    set_pu(RS2_OPTION_EXPOSURE, exposure);
+                {
+                    if (!set_pu(RS2_OPTION_EXPOSURE, exposure))
+                    {
+                        LOG_WARNING("Re-applying manual exposure after AE disable failed (v4l_uvc_device)");
+                    }
+                }
             }
 
             return true;
@@ -3059,9 +3065,15 @@ namespace librealsense
             // so the stream brightness matches the reported exposure (as done on Windows).
             if (opt == RS2_OPTION_ENABLE_AUTO_EXPOSURE && value == 0)
             {
+                LOG_DEBUG("Re-applying manual exposure " << exposure << " after AE disable (v4l_mipi_device)");
                 int32_t exposure = 0;
                 if (get_pu(RS2_OPTION_EXPOSURE, exposure))
-                    set_pu(RS2_OPTION_EXPOSURE, exposure);
+                {
+                    if (!set_pu(RS2_OPTION_EXPOSURE, exposure))
+                    {
+                        LOG_WARNING("Re-applying manual exposure after AE disable failed (v4l_mipi_device)");
+                    }
+                }
             }
 
             return true;
