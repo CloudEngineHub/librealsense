@@ -60,7 +60,12 @@ from rspy.pytest.logging_setup import (
 )
 from rspy.pytest.log_live_format import install as install_live_log_format
 from rspy.pytest.cli import consume_legacy_flags, apply_pending_flags
-from rspy.pytest.device_helpers import resolve_device_each_serials, _MISSING_SENTINEL_PREFIX, _SKIP_SENTINEL_PREFIX
+from rspy.pytest.device_helpers import (
+    resolve_device_each_serials,
+    select_target_device,
+    _MISSING_SENTINEL_PREFIX,
+    _SKIP_SENTINEL_PREFIX,
+)
 from rspy.pytest.collection import filter_and_sort_items
 from rspy.pytest.plugins import check_required_plugins
 
@@ -590,35 +595,6 @@ def test_context(module_device_setup):
     return ctx
 
 
-def _select_target_device(devices_list, module_device_setup):
-    """
-    Return the device matching the SN yielded by module_device_setup. Falls back to
-    devices_list[0] only when the test has no device parametrization (e.g. tests
-    without a device() marker). On CI rigs without a hub -- e.g. Jetson with D457 on
-    MIPI and D436 on USB -- both devices stay visible regardless of which one was
-    "enabled", so the fixture must filter by SN rather than pick devices_list[0].
-    """
-    if isinstance(module_device_setup, list):
-        # Multi-device marker (e.g. device("D400*", "D400*")) -- the test should use
-        # the test_devices (plural) fixture, not test_device. Falling back to the first
-        # device to preserve pre-PR behavior, but warn so the misuse is visible in CI.
-        log.warning(
-            "test_device/function_scoped_device fixture invoked with a multi-device marker; "
-            "use test_devices instead. Falling back to devices_list[0]."
-        )
-        return devices_list[0]
-    target_sn = module_device_setup if isinstance(module_device_setup, str) else None
-    if target_sn:
-        for d in devices_list:
-            if d.supports(rs.camera_info.serial_number) \
-               and d.get_info(rs.camera_info.serial_number) == target_sn:
-                return d
-        visible = [d.get_info(rs.camera_info.serial_number)
-                   for d in devices_list if d.supports(rs.camera_info.serial_number)]
-        pytest.fail(f"Target device {target_sn} not visible in context (visible: {visible})")
-    return devices_list[0]
-
-
 @pytest.fixture(scope="module")
 def test_device(test_context, module_device_setup):
     """Return (device, context) for the test's target device, or fail if none found."""
@@ -626,7 +602,7 @@ def test_device(test_context, module_device_setup):
     if not devices_list:
         pytest.fail("No device available for test")
 
-    dev = _select_target_device(devices_list, module_device_setup)
+    dev = select_target_device(devices_list, module_device_setup)
     log.debug(f"Test using device: {dev.get_info(rs.camera_info.name) if dev.supports(rs.camera_info.name) else 'Unknown'}")
 
     return dev, test_context
@@ -648,7 +624,7 @@ def function_scoped_device(test_context, module_device_setup):
     if not devices_list:
         pytest.fail("No device available for test")
 
-    dev = _select_target_device(devices_list, module_device_setup)
+    dev = select_target_device(devices_list, module_device_setup)
     log.debug(f"Test using fresh device handle: {dev.get_info(rs.camera_info.name) if dev.supports(rs.camera_info.name) else 'Unknown'}")
 
     return dev
