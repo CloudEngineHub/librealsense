@@ -32,7 +32,12 @@ class MetadataSocketServer:
         loop = self._rs_manager._main_loop
         if not loop or loop.is_closed():
             return
-        asyncio.run_coroutine_threadsafe(self._sio.emit(event_name, data), loop)
+        future = asyncio.run_coroutine_threadsafe(self._sio.emit(event_name, data), loop)
+        future.add_done_callback(
+            lambda f: f.exception() and print(
+                f"[MetadataBroadcaster] emit {event_name} failed: {f.exception()}"
+            )
+        )
 
     def _broadcast_metadata_loop(self, device_id, stop_event):
         """The core loop that fetches and broadcasts metadata."""
@@ -53,9 +58,6 @@ class MetadataSocketServer:
                 print(
                     f"[MetadataBroadcaster] Error getting stream status for {device_id}: {e}"
                 )
-                active_streams = []
-            except Exception as e:
-                print(f"[MetadataBroadcaster] Unexpected error getting status: {e}")
                 active_streams = []
 
             all_metadata: Dict[str, Optional[Dict]] = {}
@@ -123,6 +125,7 @@ class MetadataSocketServer:
                 target=self._broadcast_metadata_loop,
                 args=(device_id, stop_event),
                 daemon=True,
+                name=f"MetadataBroadcaster-{device_id}",
             )
             self._threads[device_id].start()
 
@@ -132,11 +135,15 @@ class MetadataSocketServer:
 
     def stop_broadcast(self, device_id: Optional[str] = None):
         """Stops the metadata broadcast loop gracefully. If device_id is None, stops all."""
+        # Join under _lock to block concurrent start_broadcast — safe because broadcaster uses a different lock.
         with self._lock:
             if device_id is None:
                 targets = list(self._threads.keys())
             else:
                 targets = [device_id] if device_id in self._threads else []
+            if not targets:
+                return
+
             threads_to_join = []
             for d in targets:
                 ev = self._stop_events.pop(d, None)
@@ -146,8 +153,8 @@ class MetadataSocketServer:
                 if t is not None:
                     threads_to_join.append(t)
 
-        print("[MetadataBroadcaster] Stopping broadcast loop...")
-        for t in threads_to_join:
-            if t.is_alive():
-                t.join(timeout=2.0)  # Wait for thread to terminate with timeout
-        print("[MetadataBroadcaster] Broadcast loop stopped.")
+            print("[MetadataBroadcaster] Stopping broadcast loop...")
+            for t in threads_to_join:
+                if t.is_alive():
+                    t.join(timeout=2.0)  # Wait for thread to terminate with timeout
+            print("[MetadataBroadcaster] Broadcast loop stopped.")
