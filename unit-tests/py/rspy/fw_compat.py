@@ -78,8 +78,12 @@ def resolve_fw_gate( rspy_device, libci_home, test_name, sn=None,
     there is something noteworthy (below min FW, or the gate can't decide).
 
     Returns (skip: bool, fw_override: str|None):
-      - (False, None)   -- compatible / can't decide / no fallback found; run the test as-is
+      - (False, None)   -- compatible / can't decide; run the test as-is
       - (False, <path>) -- below min FW with a fallback available; flash this image instead
+      - (True,  None)   -- below min FW with NO fallback registered; do not run the test.
+                          rs-fw-update -u on an unlocked camera bypasses the C++ min-FW
+                          check, so letting the test run here would silently flash a
+                          below-min image. Refuse instead.
     """
     label = f'{rspy_device.name}_{sn}' if sn else rspy_device.name
     status, reason = evaluate_fw_compat( rspy_device,
@@ -98,8 +102,8 @@ def resolve_fw_gate( rspy_device, libci_home, test_name, sn=None,
         else:
             log.i( f'{test_name}: {label}: {reason}; using fallback {fallback}' )
         return False, fallback
-    log.w( f'{test_name}: {label}: {reason}; no fallback registered, test will fail' )
-    return False, None
+    log.e( f'{test_name}: {label}: {reason}; no fallback registered in rspy/fw_fallback.json -- refusing to flash a below-min FW' )
+    return True, None
 
 
 def evaluate_fw_compat( rspy_device, custom_fw_d400_path=None, custom_fw_d555_path=None ):

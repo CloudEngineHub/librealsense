@@ -708,13 +708,24 @@ try:
                     continue
 
                 fw_d400_override = None
+                fw_gate_skip = False
                 if test.name == 'test-fw-update':
                     for sn in serial_numbers:
                         d = devices.get( sn )
-                        _, fw_d400_override = fw_compat.resolve_fw_gate(
+                        skip_for_d, override = fw_compat.resolve_fw_gate(
                             d, libci.home, test.name, sn=sn,
                             custom_fw_d400_path=custom_fw_path,
                             custom_fw_d555_path=custom_fw_d555_path )
+                        if skip_for_d:
+                            fw_gate_skip = True
+                        if override:
+                            fw_d400_override = override
+
+                if fw_gate_skip:
+                    n_tests += 1
+                    n_failed_tests += 1
+                    test_ok = False
+                    continue
 
                 for repetition in range(repeat):
                     try:
