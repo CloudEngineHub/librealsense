@@ -16,13 +16,11 @@ import sys
 import pytest
 from unittest.mock import MagicMock
 
-# Skip the whole module if either cv2 or pyrealsense2 isn't importable in this
-# environment. iq_helper imports both at module load, so they're required.
-try:
-    import cv2  # noqa: F401
-    import pyrealsense2 as rs  # noqa: F401
-except ImportError as e:
-    pytestmark = pytest.mark.skip(reason=f"{e.name} not available")
+# iq_helper imports cv2, pyrealsense2, and rspy at module load. If any of them
+# isn't available, skip the whole file cleanly (importorskip raises Skipped at
+# module level, which pytest handles as a module skip rather than a collection error).
+pytest.importorskip("cv2")
+pytest.importorskip("pyrealsense2")
 
 # iq_helper lives outside the standard rspy import path; add its directory.
 _IQ_DIR = os.path.normpath(os.path.join(
@@ -30,7 +28,7 @@ _IQ_DIR = os.path.normpath(os.path.join(
 if _IQ_DIR not in sys.path:
     sys.path.insert(0, _IQ_DIR)
 
-import iq_helper  # noqa: E402
+iq_helper = pytest.importorskip("iq_helper")
 
 
 def _make_pipeline(device_full_name):
