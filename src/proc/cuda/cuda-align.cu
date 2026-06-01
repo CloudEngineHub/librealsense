@@ -12,10 +12,14 @@
 #pragma comment(lib, "cudart_static")
 #endif
 
-#define RS2_CUDA_THREADS_PER_BLOCK 32
-
 using namespace librealsense;
 using namespace rscuda;
+
+namespace
+{
+    constexpr int ALIGN_BLOCK_X = THREADS_IN_WARP; // warp size so a warp's lanes hit consecutive image-x pixels (coalesced reads).
+    constexpr int ALIGN_BLOCK_Y = 4;               // 4 chosen empirically, best run times on tested platforms (~12 blocks/SM at 33 regs/thread)
+}
 
 template<int N> struct bytes { unsigned char b[N]; };
 
@@ -163,20 +167,19 @@ void align_cuda_helper::align_other_to_depth(unsigned char* h_aligned_out, const
 
     if (!_d_pixel_map) _d_pixel_map = alloc_dev<int2>(depth_pixel_count * 2);
 
-    // config threads
-    dim3 threads(RS2_CUDA_THREADS_PER_BLOCK, RS2_CUDA_THREADS_PER_BLOCK);
-    dim3 depth_blocks(calc_block_size(h_depth_intrin.width, threads.x), calc_block_size(h_depth_intrin.height, threads.y));
+    dim3 block(ALIGN_BLOCK_X, ALIGN_BLOCK_Y);
+    dim3 depth_blocks(calc_block_size(h_depth_intrin.width, block.x), calc_block_size(h_depth_intrin.height, block.y));
     dim3 mapping_blocks(depth_blocks.x, depth_blocks.y, 2);
 
-    kernel_map_depth_to_other <<<mapping_blocks,threads>>> (_d_pixel_map.get(), _d_depth_in.get(), _d_depth_intrinsics.get(), _d_other_intrinsics.get(),
+    kernel_map_depth_to_other <<<mapping_blocks,block>>> (_d_pixel_map.get(), _d_depth_in.get(), _d_depth_intrinsics.get(), _d_other_intrinsics.get(),
         _d_depth_other_extrinsics.get(), depth_scale);
 
     switch (other_bytes_per_pixel)
     {
-    case 1: kernel_other_to_depth<1> <<<depth_blocks,threads>>> (_d_aligned_out.get(), _d_other_in.get(), _d_pixel_map.get(), _d_depth_intrinsics.get(), _d_other_intrinsics.get()); break;
-    case 2: kernel_other_to_depth<2> <<<depth_blocks,threads>>> (_d_aligned_out.get(), _d_other_in.get(), _d_pixel_map.get(), _d_depth_intrinsics.get(), _d_other_intrinsics.get()); break;
-    case 3: kernel_other_to_depth<3> <<<depth_blocks,threads>>> (_d_aligned_out.get(), _d_other_in.get(), _d_pixel_map.get(), _d_depth_intrinsics.get(), _d_other_intrinsics.get()); break;
-    case 4: kernel_other_to_depth<4> <<<depth_blocks,threads>>> (_d_aligned_out.get(), _d_other_in.get(), _d_pixel_map.get(), _d_depth_intrinsics.get(), _d_other_intrinsics.get()); break;
+    case 1: kernel_other_to_depth<1> <<<depth_blocks,block>>> (_d_aligned_out.get(), _d_other_in.get(), _d_pixel_map.get(), _d_depth_intrinsics.get(), _d_other_intrinsics.get()); break;
+    case 2: kernel_other_to_depth<2> <<<depth_blocks,block>>> (_d_aligned_out.get(), _d_other_in.get(), _d_pixel_map.get(), _d_depth_intrinsics.get(), _d_other_intrinsics.get()); break;
+    case 3: kernel_other_to_depth<3> <<<depth_blocks,block>>> (_d_aligned_out.get(), _d_other_in.get(), _d_pixel_map.get(), _d_depth_intrinsics.get(), _d_other_intrinsics.get()); break;
+    case 4: kernel_other_to_depth<4> <<<depth_blocks,block>>> (_d_aligned_out.get(), _d_other_in.get(), _d_pixel_map.get(), _d_depth_intrinsics.get(), _d_other_intrinsics.get()); break;
     }
 
     cudaStreamSynchronize(0);
@@ -208,19 +211,18 @@ void align_cuda_helper::align_depth_to_other(unsigned char* h_aligned_out, const
 
     if (!_d_pixel_map) _d_pixel_map = alloc_dev<int2>(depth_pixel_count * 2);
 
-    // config threads
-    dim3 threads(RS2_CUDA_THREADS_PER_BLOCK, RS2_CUDA_THREADS_PER_BLOCK);
-    dim3 depth_blocks(calc_block_size(h_depth_intrin.width, threads.x), calc_block_size(h_depth_intrin.height, threads.y));
-    dim3 other_blocks(calc_block_size(h_other_intrin.width, threads.x), calc_block_size(h_other_intrin.height, threads.y));
+    dim3 block(ALIGN_BLOCK_X, ALIGN_BLOCK_Y);
+    dim3 depth_blocks(calc_block_size(h_depth_intrin.width, block.x), calc_block_size(h_depth_intrin.height, block.y));
+    dim3 other_blocks(calc_block_size(h_other_intrin.width, block.x), calc_block_size(h_other_intrin.height, block.y));
     dim3 mapping_blocks(depth_blocks.x, depth_blocks.y, 2);
 
-    kernel_map_depth_to_other <<<mapping_blocks,threads>>> (_d_pixel_map.get(), _d_depth_in.get(), _d_depth_intrinsics.get(),
+    kernel_map_depth_to_other <<<mapping_blocks,block>>> (_d_pixel_map.get(), _d_depth_in.get(), _d_depth_intrinsics.get(),
         _d_other_intrinsics.get(), _d_depth_other_extrinsics.get(), depth_scale);
 
-    kernel_depth_to_other <<<depth_blocks,threads>>> ((uint16_t*)_d_aligned_out.get(), _d_depth_in.get(), _d_pixel_map.get(),
+    kernel_depth_to_other <<<depth_blocks,block>>> ((uint16_t*)_d_aligned_out.get(), _d_depth_in.get(), _d_pixel_map.get(),
         _d_depth_intrinsics.get(), _d_other_intrinsics.get());
 
-    kernel_replace_to_zero <<<other_blocks, threads>>> ((uint16_t*)_d_aligned_out.get(), _d_other_intrinsics.get());
+    kernel_replace_to_zero <<<other_blocks,block>>> ((uint16_t*)_d_aligned_out.get(), _d_other_intrinsics.get());
 
     cudaStreamSynchronize(0);
 
