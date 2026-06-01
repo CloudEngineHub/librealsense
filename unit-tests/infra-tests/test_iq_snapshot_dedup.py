@@ -16,16 +16,13 @@ import sys
 import pytest
 from unittest.mock import MagicMock
 
+# Skip the whole module if either cv2 or pyrealsense2 isn't importable in this
+# environment. iq_helper imports both at module load, so they're required.
 try:
-    import pyrealsense2 as rs
-except ImportError:
-    pytestmark = pytest.mark.skip(reason="pyrealsense2 not available")
-    rs = None
-
-# cv2 may not be installed in the infra-test environment; stub it out before
-# iq_helper imports it. cv2.imwrite calls become recordable MagicMock calls.
-_cv2_mock = MagicMock()
-sys.modules['cv2'] = _cv2_mock
+    import cv2  # noqa: F401
+    import pyrealsense2 as rs  # noqa: F401
+except ImportError as e:
+    pytestmark = pytest.mark.skip(reason=f"{e.name} not available")
 
 # iq_helper lives outside the standard rspy import path; add its directory.
 _IQ_DIR = os.path.normpath(os.path.join(
@@ -51,14 +48,17 @@ def _make_image():
 class TestSaveFailureSnapshotDedup:
 
     @pytest.fixture(autouse=True)
-    def _reset_state(self):
-        """Each test starts with an empty dedup set and a fresh cv2.imwrite mock."""
+    def imwrite_mock(self, monkeypatch):
+        """Mock only iq_helper's cv2.imwrite for the duration of each test, and reset the
+        module-level dedup state. Using monkeypatch (rather than mutating sys.modules['cv2'])
+        keeps the real cv2 intact for any other test in the same pytest session."""
         iq_helper._snapshot_saved.clear()
-        _cv2_mock.imwrite.reset_mock()
-        yield
+        mock = MagicMock()
+        monkeypatch.setattr(iq_helper.cv2, 'imwrite', mock)
+        yield mock
         iq_helper._snapshot_saved.clear()
 
-    def test_same_test_different_devices_both_saved(self):
+    def test_same_test_different_devices_both_saved(self, imwrite_mock):
         """The Jetson scenario: D457 and D436 both fail same test -> two snapshots."""
         iq_helper.save_failure_snapshot(
             'test_basic_color.py',
@@ -69,12 +69,12 @@ class TestSaveFailureSnapshotDedup:
             _make_pipeline('Intel RealSense D436'),
             annotated_image=_make_image())
 
-        saved_paths = [c.args[0] for c in _cv2_mock.imwrite.call_args_list]
+        saved_paths = [c.args[0] for c in imwrite_mock.call_args_list]
         assert len(saved_paths) == 2, f"expected 2 snapshots, got: {saved_paths}"
         assert any('D457' in os.path.basename(p) for p in saved_paths), saved_paths
         assert any('D436' in os.path.basename(p) for p in saved_paths), saved_paths
 
-    def test_same_test_same_device_deduped(self):
+    def test_same_test_same_device_deduped(self, imwrite_mock):
         """Repeated failure on the same (test, device) pair only saves once."""
         iq_helper.save_failure_snapshot(
             'test_basic_color.py',
@@ -85,9 +85,9 @@ class TestSaveFailureSnapshotDedup:
             _make_pipeline('Intel RealSense D457'),
             annotated_image=_make_image())
 
-        assert _cv2_mock.imwrite.call_count == 1
+        assert imwrite_mock.call_count == 1
 
-    def test_different_tests_independent_dedup(self):
+    def test_different_tests_independent_dedup(self, imwrite_mock):
         """Different test files dedupe independently even when sharing a device."""
         iq_helper.save_failure_snapshot(
             'test_basic_color.py',
@@ -98,9 +98,9 @@ class TestSaveFailureSnapshotDedup:
             _make_pipeline('Intel RealSense D436'),
             annotated_image=_make_image())
 
-        assert _cv2_mock.imwrite.call_count == 2
+        assert imwrite_mock.call_count == 2
 
-    def test_no_device_name_falls_back_to_test_name(self):
+    def test_no_device_name_falls_back_to_test_name(self, imwrite_mock):
         """When pipeline can't yield a device name, filename omits the device suffix."""
         bad_pipeline = MagicMock()
         bad_pipeline.get_active_profile.side_effect = RuntimeError("no profile")
@@ -108,8 +108,8 @@ class TestSaveFailureSnapshotDedup:
         iq_helper.save_failure_snapshot(
             'test_basic_color.py', bad_pipeline, annotated_image=_make_image())
 
-        assert _cv2_mock.imwrite.call_count == 1
-        saved_path = _cv2_mock.imwrite.call_args.args[0]
+        assert imwrite_mock.call_count == 1
+        saved_path = imwrite_mock.call_args.args[0]
         basename = os.path.basename(saved_path)
         assert basename == 'test_basic_color.png', \
             f"expected device-less filename, got: {basename}"
