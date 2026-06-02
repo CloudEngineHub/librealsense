@@ -122,8 +122,8 @@ class RealSenseManager:
                 self._remove_device(serial)
             self._supported_md_by_profile.clear()
 
-        if removed and self.metadata_socket_server._target_device_id in removed:
-            self.metadata_socket_server.stop_broadcast()
+        for serial in removed:
+            self.metadata_socket_server.stop_broadcast(serial)
 
         if added or removed:
             logging.info("devices_changed: +%s -%s", added, removed)
