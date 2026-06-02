@@ -466,6 +466,38 @@ def devices_by_test_config( test, exceptions ):
             continue
 
 
+# Lazy-discovered path to the rs-fw-update binary; cached on first need.
+_FW_UPDATER_EXE_CACHE = None
+
+
+def _find_fw_updater_exe():
+    """Locate the built rs-fw-update binary inside repo.build. Returns None if not found."""
+    regex = r'(^|/)rs-fw-update'
+    if platform.system() == 'Windows':
+        regex += r'\.exe'
+    regex += '$'
+    for tool in file.find( repo.build, regex ):
+        return os.path.join( repo.build, tool )
+    return None
+
+
+def _pre_test_fw_recovery_if_needed( test ):
+    """Before invoking test-fw-update (initial attempt or retry), recover any D400 in
+    DFU mode with the gold signed FW. No-op for other tests."""
+    if test.name != 'test-fw-update':
+        return
+    global _FW_UPDATER_EXE_CACHE
+    if _FW_UPDATER_EXE_CACHE is None:
+        _FW_UPDATER_EXE_CACHE = _find_fw_updater_exe()
+        if _FW_UPDATER_EXE_CACHE is None:
+            log.w( '[pre-test-fw-recovery] rs-fw-update binary not found; skipping' )
+            return
+    try:
+        fw_compat.recover_d400_devices_in_dfu( _FW_UPDATER_EXE_CACHE, context=context )
+    except Exception as e:
+        log.w( f'[pre-test-fw-recovery] unexpected error: {e}' )
+
+
 def test_wrapper_( test, configuration=None, repetition=1, curr_retry=0, max_retry = 0, sns=None, custom_fw_d400_override=None ):
     global rslog
     #
@@ -527,6 +559,10 @@ def test_wrapper( test, configuration=None, repetition=1, serial_numbers=None, c
             if no_reset or not serial_numbers:
                 time.sleep(1)  # small pause between tries
             else:
+                # If we're about to retry test-fw-update and the device entered DFU during
+                # the previous attempt, recover it before enable_only times out trying to
+                # find the original SN.
+                _pre_test_fw_recovery_if_needed( test )
                 devices.enable_only( serial_numbers, recycle=True )
         if test_wrapper_( test, configuration, repetition, retry, retry_count, serial_numbers,
                           custom_fw_d400_override=custom_fw_d400_override ):
@@ -732,6 +768,9 @@ try:
                         log.d( 'configuration:', configuration_str( configuration, repetition, sns=serial_numbers ) )
                         log.debug_indent()
                         should_reset = not no_reset
+                        # For test-fw-update: recover any D400 that's currently in DFU
+                        # before enable_only, so the hub-recycle finds the device by SN.
+                        _pre_test_fw_recovery_if_needed( test )
                         devices.enable_only( serial_numbers, recycle=should_reset )
                     except (RuntimeError, TimeoutError, OSError) as e:
                         log.w( log.red + test.name + log.reset + ': ' + str( e ) )
