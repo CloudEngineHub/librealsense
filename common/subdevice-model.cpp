@@ -122,12 +122,7 @@ namespace rs2
         // Decimation halves depth resolution while leaving IR unchanged; the mismatch would
         // trigger the resolution guard in min_z_depth_improver::apply() and silently skip MinZ.
 #ifdef BUILD_WITH_MINZ
-        std::string device_pid = s->get_info(RS2_CAMERA_INFO_PRODUCT_ID);
-        if( !is_rgb_camera && (s->supports( RS2_OPTION_STEREO_BASELINE ) ||
-                                            device_pid == "ABCC" || //D401 GMSL
-                                            device_pid == "ABCD" || //D457 GMSL
-                                            device_pid == "ABCE" || //D430 GMSL
-                                            device_pid == "ABCF"))  //D415 GMSL
+        if( !is_rgb_camera && s->supports( RS2_OPTION_STEREO_BASELINE ) )
         {
             auto block = std::make_shared< minz_filter >();
             auto model = std::make_shared< processing_block_model >(
