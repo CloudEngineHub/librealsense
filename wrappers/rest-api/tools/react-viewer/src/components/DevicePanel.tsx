@@ -92,6 +92,10 @@ export function DevicePanel() {
         : { status: 'unknown' as const, is_updating: false, progress: 1.0 }
     )
     addToast('success', `Firmware update successful! Version: ${fwVersion || 'Unknown'}`)
+    // Backend has already refreshed the device list (in _refresh_until_device_returns)
+    // by the time it emits firmware_update_success; pull the new device_infos so
+    // the UI shows the updated firmware_version without a manual Refresh click.
+    fetchDevices(true)
   }
 
   const handleFirmwareError = (error: string) => {
@@ -101,6 +105,9 @@ export function DevicePanel() {
         : { status: 'unknown' as const, is_updating: false, progress: 0, last_error: error }
     )
     addToast('error', `Firmware update failed: ${error}`)
+    // Device may or may not have returned; refresh so the UI reflects the
+    // current connection state (e.g. stuck-in-DFU disappears from the list).
+    fetchDevices(true)
   }
 
   const handleCloseFirmwareModal = () => {

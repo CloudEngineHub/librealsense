@@ -155,14 +155,15 @@ class RealSenseManager:
             logging.warning("Socket emit failed (%s): %s", event, exc)
 
     def refresh_devices(self) -> List[DeviceInfo]:
-        """Refresh the list of connected devices"""
-        # Skip enumeration while a firmware update is running. A concurrent
-        # call to self.ctx.devices/query_devices() invalidates the rs.device
-        # handles held by the FW-update thread (notably the DFU update_dev
-        # returned by _wait_for_dfu_device), causing the SDK to throw
-        # 'null pointer passed for argument "device"' on the subsequent
-        # update_dev.update(...) call. Return the cached snapshot instead;
-        # update_firmware_from_bytes runs a real refresh once it finishes.
+        """Refresh the list of connected devices.
+
+        Public entry point; skips ctx enumeration while a firmware update is in
+        progress to avoid the polling thread invalidating the FW thread's
+        ``rs.device`` handles (which causes ``null pointer passed for argument
+        "device"`` on the subsequent ``update_dev.update(...)`` call). The FW
+        thread itself uses ``_refresh_devices_locked`` directly to bypass the
+        guard once DFU is complete.
+        """
         with self.lock:
             if self._fw_updates_in_progress:
                 logging.debug(
@@ -170,7 +171,11 @@ class RealSenseManager:
                     self._fw_updates_in_progress,
                 )
                 return list(self.device_infos.values())
+        return self._refresh_devices_locked()
 
+    def _refresh_devices_locked(self) -> List[DeviceInfo]:
+        """Actual device enumeration (no FW-in-progress guard)."""
+        with self.lock:
             # Clear existing devices (that aren't streaming)
             for device_id in list(self.devices.keys()):
                 if device_id not in self.pipelines:
@@ -707,12 +712,19 @@ class RealSenseManager:
     def _refresh_until_device_returns(
         self, device_id: str, attempts: int = 8,
     ) -> Optional[DeviceInfo]:
-        """Re-poll refresh_devices() until device_id reappears in device_infos."""
+        """Re-enumerate until device_id reappears in device_infos.
+
+        Calls ``_refresh_devices_locked`` directly to bypass the
+        ``_fw_updates_in_progress`` guard on the public ``refresh_devices``: the
+        FW slot is still claimed at this point (released in the outer
+        ``finally``), but DFU has finished and we own the FW thread, so it's
+        safe — and necessary — to enumerate.
+        """
         # The USB re-enumeration may lag behind the SDK's first query. Give it
-        # a few seconds to settle, then retry refresh until the device reappears.
+        # a few seconds to settle, then retry until the device reappears.
         time.sleep(3)
         for attempt in range(attempts):
-            self.refresh_devices()
+            self._refresh_devices_locked()
             updated_info = self.device_infos.get(device_id)
             if updated_info:
                 logging.info(
