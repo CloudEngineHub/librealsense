@@ -50,7 +50,7 @@ NUM_ITERATIONS = 1
 def test_occ_calibration(test_device):
     dev, _ = test_device
     # mipi devices do not support OCC calibration without host assistance
-    if is_mipi_device():
+    if is_mipi_device(dev):
         pytest.skip("MIPI/GMSL devices require host assistance — covered by test_occ_calibration_with_host_assistance")
     for iteration in range(1, NUM_ITERATIONS + 1):
         try:
@@ -69,7 +69,7 @@ def test_occ_calibration(test_device):
 
 def test_occ_calibration_with_host_assistance(test_device):
     dev, _ = test_device
-    if not is_mipi_device():
+    if not is_mipi_device(dev):
         pytest.skip("Host-assistance OCC calibration is only run on MIPI/GMSL devices")
     for iteration in range(1, NUM_ITERATIONS + 1):
         try:

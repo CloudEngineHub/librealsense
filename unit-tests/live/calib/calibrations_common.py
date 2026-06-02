@@ -299,16 +299,27 @@ def measure_depth_fill_rate(config, pipe, width=640, height=480, fps=30, frames=
         return None
 
 
-def is_mipi_device():
-    ctx = rs.context()
-    device = ctx.query_devices()[0]
+def is_mipi_device(device=None):
+    """True if *device* is on a GMSL (MIPI) connection.
+
+    *device* should be the pyrealsense2 handle returned by the test_device fixture.
+    Without it, this function reads ctx.query_devices()[0] -- on hubless multi-device
+    rigs (e.g. Jetson with D457 + D436) that returns whichever device pyrealsense2
+    enumerated first, not the one the test is parametrized for. Always pass *device*
+    when called from a parametrized test.
+    """
+    if device is None:
+        ctx = rs.context()
+        device = ctx.query_devices()[0]
     return device.supports(rs.camera_info.connection_type) and device.get_info(rs.camera_info.connection_type) == "GMSL"
 
-def is_d555():
+def is_d555(device=None):
+    """True if *device* is a D555. See is_mipi_device for why *device* should be passed."""
     try:
-        ctx = rs.context()
-        dev = ctx.query_devices()[0]
-        name = dev.get_info(rs.camera_info.name) if dev.supports(rs.camera_info.name) else ""
+        if device is None:
+            ctx = rs.context()
+            device = ctx.query_devices()[0]
+        name = device.get_info(rs.camera_info.name) if device.supports(rs.camera_info.name) else ""
         return ("D555" in name)
     except Exception:
         return False
