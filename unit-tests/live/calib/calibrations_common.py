@@ -29,22 +29,27 @@ def on_calib_cb(progress):
     pp = int(progress)
     log.debug( f"Calibration at {progress}%" )
 
-def get_calibration_device(image_width, image_height, fps):
+def get_calibration_device(image_width, image_height, fps, dev=None):
     """
     Setup and configure the calibration device.
-    
+
     Args:
         image_width (int): Image width
         image_height (int): Image height
         fps (int): Frames per second
-        
+        dev: optional pyrealsense2 device handle. When provided, the pipeline is
+            bound to its serial number; required on hubless multi-device rigs
+            (e.g. Jetson with D457 + D436) where the context sees both devices.
+
     Returns:
         tuple: (pipeline, auto_calibrated_device)
     """
     config = rs.config()
     pipeline = rs.pipeline()
     pipeline_wrapper = rs.pipeline_wrapper(pipeline)
-    config.enable_stream(rs.stream.depth, image_width, image_height, rs.format.z16, fps)            
+    if dev is not None:
+        config.enable_device(dev.get_info(rs.camera_info.serial_number))
+    config.enable_stream(rs.stream.depth, image_width, image_height, rs.format.z16, fps)
 
     pipeline_profile = config.resolve(pipeline_wrapper)
     auto_calibrated_device = rs.auto_calibrated_device(pipeline_profile.get_device())
