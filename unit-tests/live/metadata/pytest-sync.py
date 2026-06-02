@@ -58,6 +58,9 @@ def run_test(device, ctx, resolution, fps):
     """Run timestamp synchronization test for a specific resolution and FPS"""
     pipeline = rs.pipeline(ctx)
     cfg = rs.config()
+    # On hubless multi-device rigs (e.g. Jetson with D457 + D436) the context sees every
+    # connected device; without enable_device(sn) the pipeline picks the first match.
+    cfg.enable_device(device.get_info(rs.camera_info.serial_number))
     cfg.enable_stream(rs.stream.depth, resolution[0], resolution[1], rs.format.z16, fps)
     cfg.enable_stream(rs.stream.infrared, 1, resolution[0], resolution[1], rs.format.y8, fps)
     cfg.enable_stream(rs.stream.infrared, 2, resolution[0], resolution[1], rs.format.y8, fps)

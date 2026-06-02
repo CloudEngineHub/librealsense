@@ -67,6 +67,9 @@ def test_depth_laser_on(test_device_wrapped):
     product_name = dev.get_info(rs.camera_info.name)
 
     cfg = rs.config()
+    # On hubless multi-device rigs (e.g. Jetson with D457 + D436) the context sees every
+    # connected device; without enable_device(sn) the pipeline picks the first match.
+    cfg.enable_device(dev.get_info(rs.camera_info.serial_number))
     cfg.enable_stream(rs.stream.depth, rs.format.z16, 30)
 
     pipeline = rs.pipeline(ctx)
