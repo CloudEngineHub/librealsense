@@ -54,10 +54,11 @@ jobs:
         run: |
           set -euo pipefail
           apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
-          VERSION=$(curl -fsSLI -o /dev/null -w '%{url_effective}' --retry 5 --retry-delay 5 \
+          VERSION=$(curl -fsSLI -o /dev/null -w '%{url_effective}' --retry 5 --retry-delay 5 --retry-all-errors \
             https://github.com/ros-infrastructure/ros-apt-source/releases/latest | sed 's|.*/||')
+          [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+)+$ ]] || { echo "ERROR: could not resolve ros-apt-source version (got: '${VERSION}')"; exit 1; }
           codename=$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
-          curl -fsSL --retry 5 --retry-delay 5 -o /tmp/ros2-apt-source.deb \
+          curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o /tmp/ros2-apt-source.deb \
             "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${VERSION}/ros2-apt-source_${VERSION}.${codename}_all.deb"
           dpkg -i /tmp/ros2-apt-source.deb
 
