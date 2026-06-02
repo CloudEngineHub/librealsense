@@ -96,7 +96,13 @@ public:
     explicit rs_depth_range_impl( const rs_depth::Calibration & cal )
     {
         rs_depth_range_loader & ldr = get_rs_depth_range_loader();
-        _handle = ldr.create()( &cal );
+        _handle = ldr.create()(
+            cal.focal_length_px,
+            cal.baseline_m,
+            cal.min_z_threshold_mm(),
+            0.35f,       // scale_factor — matches DepthRangeImprover default
+            -1, -1, -1, -1  // no crop region
+        );
         if( ! _handle )
         {
             const char * err = ldr.last_error()( nullptr );
