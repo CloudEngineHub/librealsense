@@ -167,8 +167,6 @@ if device.is_in_recovery_mode():
         subprocess.run( cmd )
         recovered = True
         fw_compat.reload_d4xx_driver_on_jetson( test.context )
-        # Give the device time to re-enumerate in normal mode.
-        time.sleep( 5 )
     except Exception as e:
         test.unexpected_exception()
         log.f( "Unexpected error while trying to recover device:", e )
@@ -176,15 +174,32 @@ if device.is_in_recovery_mode():
         # The device's identity changed: in DFU it exposed firmware_update_id only,
         # now in normal mode it exposes its real serial_number (optic_serial). The
         # firmware_update_id (asic_serial) is still exposed and matches what the
-        # harness was tracking, so find_first_device_or_exit(args.serial) resolves
-        # via the FWID fallback. We then re-pin args.serial to the real SN so the
-        # downstream rs-fw-update -s <sn> finds the now-normal device.
-        device, ctx = test.find_first_device_or_exit( args.serial )
-        if device.supports( rs.camera_info.serial_number ):
-            new_sn = device.get_info( rs.camera_info.serial_number )
+        # harness was tracking. Poll for the device to re-enumerate in normal mode
+        # (a fresh rs.context() needs time after rs-fw-update exits) -- up to 60s.
+        log.d( "waiting for recovered device to re-enumerate in normal mode..." )
+        deadline = time.time() + 60
+        recovered_device = None
+        while time.time() < deadline:
+            for d in rs.context().devices:
+                if d.supports( rs.camera_info.firmware_update_id ) \
+                   and d.get_info( rs.camera_info.firmware_update_id ) == args.serial \
+                   and not d.is_in_recovery_mode():
+                    recovered_device = d
+                    break
+            if recovered_device is not None:
+                break
+            time.sleep( 2 )
+        if recovered_device is None:
+            log.f( f"Recovered device with firmware_update_id '{args.serial}' did not "
+                   f"re-enumerate within 60s after gold FW flash" )
+        # Re-pin args.serial to the device's normal-mode SN so downstream
+        # rs-fw-update -s <sn> finds the device (rs-fw-update.cpp:480 uses SN when supported).
+        if recovered_device.supports( rs.camera_info.serial_number ):
+            new_sn = recovered_device.get_info( rs.camera_info.serial_number )
             if new_sn != args.serial:
                 log.d( f're-pinning args.serial: {args.serial} (FWID) -> {new_sn} (SN)' )
                 args.serial = new_sn
+        device, ctx = test.find_first_device_or_exit( args.serial )
         current_fw_version = rsutils.version(device.get_info(rs.camera_info.firmware_version))
         log.d("FW version after recovery:", current_fw_version)
 
