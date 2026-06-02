@@ -15,7 +15,7 @@ import re
 import platform
 import pyrealsense2 as rs
 import pyrsutils as rsutils
-from rspy import log, test, file, repo
+from rspy import log, test, file, repo, fw_compat
 import time
 import argparse
 
@@ -156,36 +156,35 @@ recovered = False
 if device.is_in_recovery_mode():
     log.d( "recovering device ..." )
     try:
-        # always flash signed fw when device on recovery before flashing anything else
-        image_file = custom_fw_path
-        cmd = [fw_updater_exe, '-r', '-f', image_file]
+        # rs-fw-update -r requires a *signed* FW image. The caller's --custom-fw-d400
+        # is typically unsigned, so we fetch a gold signed FW from S3 to recover with.
+        gold_fw = fw_compat.download_gold_d400_fw()
+        if not gold_fw:
+            log.f( "Could not download gold signed FW; cannot recover DFU device" )
+        cmd = [fw_updater_exe, '-r', '-f', gold_fw, '-s', args.serial]
         del device, ctx
         log.d( 'running:', cmd )
         subprocess.run( cmd )
         recovered = True
-
-        if 'jetson' in test.context:
-            # Reload d4xx mipi driver on Jetson
-            log.d("Reloading d4xx driver on Jetson...")
-            try:
-                # Try to reload the driver, but don't fail if sudo requires a password
-                result = subprocess.run(['sudo', '-n', 'modprobe', '-r', 'd4xx'], 
-                                      capture_output=True, text=True)
-                if result.returncode != 0:
-                    log.e("Failed to remove d4xx module (may require passwordless sudo):", result.stderr)
-                else:
-                    load_result = subprocess.run(['sudo', '-n', 'modprobe', 'd4xx'], 
-                                              capture_output=True, text=True, check=False)
-                    if load_result.returncode != 0:
-                        log.e("Failed to load d4xx module (may require passwordless sudo):",
-                              f"returncode={load_result.returncode}, stderr={load_result.stderr}")
-            except Exception as driver_error:
-                log.w("Could not reload d4xx driver (passwordless sudo may not be configured):", driver_error)
+        fw_compat.reload_d4xx_driver_on_jetson( test.context )
+        # Give the device time to re-enumerate in normal mode.
+        time.sleep( 5 )
     except Exception as e:
         test.unexpected_exception()
         log.f( "Unexpected error while trying to recover device:", e )
     else:
+        # The device's identity changed: in DFU it exposed firmware_update_id only,
+        # now in normal mode it exposes its real serial_number (optic_serial). The
+        # firmware_update_id (asic_serial) is still exposed and matches what the
+        # harness was tracking, so find_first_device_or_exit(args.serial) resolves
+        # via the FWID fallback. We then re-pin args.serial to the real SN so the
+        # downstream rs-fw-update -s <sn> finds the now-normal device.
         device, ctx = test.find_first_device_or_exit( args.serial )
+        if device.supports( rs.camera_info.serial_number ):
+            new_sn = device.get_info( rs.camera_info.serial_number )
+            if new_sn != args.serial:
+                log.d( f're-pinning args.serial: {args.serial} (FWID) -> {new_sn} (SN)' )
+                args.serial = new_sn
         current_fw_version = rsutils.version(device.get_info(rs.camera_info.firmware_version))
         log.d("FW version after recovery:", current_fw_version)
 

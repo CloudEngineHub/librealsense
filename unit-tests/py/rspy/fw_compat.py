@@ -33,31 +33,19 @@ _FALLBACK_JSON = os.path.join( os.path.dirname( __file__ ), 'fw_fallback.json' )
 # test-data downloads, e.g. unit-tests/post-processing/test-filters.py). Used as a
 # recovery image for any D400 device that's in DFU mode -- rs-fw-update's recovery (-r)
 # path only accepts signed FW, so we can't reuse the unsigned --custom-fw-d400 path.
-_GOLD_D400_FW_URL = "https://librealsense.realsenseai.com/Releases/RS4xx/FW/D4XX_FW_Image-5.17.0.10.bin"
+GOLD_D400_FW_URL = "https://librealsense.realsenseai.com/Releases/RS4xx/FW/D4XX_FW_Image-5.17.0.10.bin"
 
 
-def _looks_d400_recovery(d):
-    """True if d is a D400-series device currently in DFU/recovery mode."""
-    import pyrealsense2 as rs
-    if not d.is_in_recovery_mode():
-        return False
-    if d.supports(rs.camera_info.product_line) and d.get_info(rs.camera_info.product_line) == 'D400':
-        return True
-    if d.supports(rs.camera_info.name) and 'D4' in d.get_info(rs.camera_info.name):
-        return True
-    return False
-
-
-def _download_gold_d400_fw():
+def download_gold_d400_fw():
     """Download the D4XX gold signed FW (5.17.0.10) to a per-process temp cache.
     Returns the local path, or None on failure."""
-    dest = os.path.join(tempfile.gettempdir(), os.path.basename(_GOLD_D400_FW_URL))
+    dest = os.path.join(tempfile.gettempdir(), os.path.basename(GOLD_D400_FW_URL))
     if os.path.isfile(dest):
         log.d(f"gold D400 FW already cached: {dest}")
         return dest
-    log.d(f"downloading gold D400 FW from {_GOLD_D400_FW_URL}")
+    log.d(f"downloading gold D400 FW from {GOLD_D400_FW_URL}")
     try:
-        with urllib.request.urlopen(_GOLD_D400_FW_URL) as response, open(dest, 'wb') as out_file:
+        with urllib.request.urlopen(GOLD_D400_FW_URL) as response, open(dest, 'wb') as out_file:
             out_file.write(response.read())
     except Exception as e:
         log.w(f"failed to download gold D400 FW from S3: {e}")
@@ -66,7 +54,7 @@ def _download_gold_d400_fw():
     return dest
 
 
-def _reload_d4xx_driver_on_jetson(context):
+def reload_d4xx_driver_on_jetson(context):
     """On Jetson, the d4xx MIPI driver must be reloaded after a recovery flash so the
     re-enumerated device shows up. No-op (with a warning) if sudo requires a password
     or if we're not running under the 'jetson' context."""
@@ -84,50 +72,6 @@ def _reload_d4xx_driver_on_jetson(context):
                   f"returncode={ld.returncode}, stderr={ld.stderr}")
     except Exception as e:
         log.w("Could not reload d4xx driver (passwordless sudo may not be configured):", e)
-
-
-def recover_d400_devices_in_dfu(fw_updater_exe, context=None):
-    """Pre-test step: find any D400 devices currently in DFU/recovery mode and recover
-    them with a gold signed FW pulled from the RealSense releases S3.
-
-    Intended to be called by the harness (run-unit-tests.py) before `enable_only` and
-    before each retry of `test-fw-update`. A previous mid-flash failure can leave the
-    device in DFU; without this pre-step, every subsequent run sees a device that
-    exposes only `firmware_update_id` and the harness/test can't recover it cleanly.
-
-    rs-fw-update's recovery (-r) path only accepts signed FW images, so the unsigned
-    --custom-fw-d400 used elsewhere in CI won't work here.
-
-    No-op when no D400 is in DFU. Best-effort -- logs a warning and returns on any
-    failure rather than raising, so the surrounding test still gets a chance to run.
-    """
-    import pyrealsense2 as rs
-
-    ctx = rs.context()
-    recovery_devs = [d for d in ctx.devices if _looks_d400_recovery(d)]
-    if not recovery_devs:
-        return
-
-    log.i(f"Found {len(recovery_devs)} D400 device(s) in DFU; recovering with gold signed FW")
-    gold_fw = _download_gold_d400_fw()
-    if gold_fw is None:
-        log.w("No gold FW available; skipping pre-test recovery")
-        return
-
-    for d in recovery_devs:
-        fwid = d.get_info(rs.camera_info.firmware_update_id)
-        cmd = [fw_updater_exe, '-r', '-f', gold_fw, '-s', fwid]
-        log.d(f"[pre-test-fw-recovery] running: {cmd}")
-        try:
-            result = subprocess.run(cmd)
-        except Exception as e:
-            log.w(f"[pre-test-fw-recovery] subprocess.run raised for {fwid}: {e}")
-            continue
-        if result.returncode != 0:
-            log.w(f"[pre-test-fw-recovery] rs-fw-update -r returned {result.returncode} for {fwid}; continuing")
-            continue
-        _reload_d4xx_driver_on_jetson(context)
-        time.sleep(5)  # let device settle in normal mode before subsequent enable_only
 
 
 def _load_fallback_map():
