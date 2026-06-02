@@ -158,7 +158,12 @@ namespace librealsense
         return std::make_shared<serialized_end_of_file>();
     }
 
-    std::shared_ptr< serialized_frame > ros2_reader::create_frame(const std::shared_ptr<rosbag2_storage::SerializedBagMessage> msg)
+    bool ros2_reader::is_frame_topic(const std::string& topic, stream_identifier& sid) const
+    {
+        return is_stream_topic(topic, sid);
+    }
+
+    std::shared_ptr< serialized_frame > ros2_reader::create_frame(const std::shared_ptr<rosbag2_storage::SerializedBagMessage>& msg)
     {
         nanoseconds timestamp(msg->time_stamp);
         stream_identifier stream_id = ros2_topic::get_stream_identifier(msg->topic_name);
@@ -275,9 +280,7 @@ namespace librealsense
             return std::make_shared<serialized_invalid_frame>(timestamp, stream_id);
         }
 
-        auto result = std::make_shared<serialized_frame>(timestamp, stream_id, std::move(frame));
-        _last_frame_cache[stream_id] = result;
-        return result;
+        return std::make_shared<serialized_frame>(timestamp, stream_id, std::move(frame));
     }
 
     std::shared_ptr<stream_profile_interface> ros2_reader::read_next_stream_profile()

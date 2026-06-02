@@ -62,8 +62,8 @@ namespace librealsense
         virtual std::vector<std::string> get_option_topics() const = 0;
         virtual std::vector<std::string> get_notification_topics() const = 0;
 
-        // Lookahead cache. Both readers' read_next_data go through here so seek_to_time's
-        // primed message is consumed first. ros2_reader also uses peek for metadata-follows-data.
+        // Lookahead cache. Both readers' read_next_data go through here; ros2_reader also uses peek
+        // for metadata-follows-data.
         bool                                                  has_next_cached() const;
         std::shared_ptr<rosbag2_storage::SerializedBagMessage> read_next_cached();
         std::shared_ptr<rosbag2_storage::SerializedBagMessage> peek_next_cached();
@@ -78,7 +78,12 @@ namespace librealsense
         // differently (device snapshot scan vs. cached map), hence pure virtual.
         virtual void setup_frame(frame_interface* frame_ptr, const stream_identifier& sid) const = 0;
 
-        std::shared_ptr<rosbag2_storage::storage_interfaces::ReadWriteInterface> _storage;
+        // True if `topic` carries frame data (not metadata/option/notification); fills `sid`.
+        virtual bool is_frame_topic(const std::string& topic, stream_identifier& sid) const = 0;
+        virtual std::shared_ptr<serialized_frame> create_frame(
+            const std::shared_ptr<rosbag2_storage::SerializedBagMessage>& msg) = 0;
+
+        std::shared_ptr<rosbag2_storage_plugins::SqliteStorage> _storage;
         std::shared_ptr<metadata_parser_map>          m_metadata_parser_map;
         device_snapshot                               m_initial_device_description;
         nanoseconds                                   m_total_duration;
@@ -89,7 +94,6 @@ namespace librealsense
 
         bool                                          _initialized = false;
         std::set<stream_identifier>                   _enabled_streams;
-        std::map<stream_identifier, std::shared_ptr<serialized_data>> _last_frame_cache;
 
         // Filter applied to `_storage` for streaming (data + option + notification topics
         // for ros2_reader; image + IMU stream topics for native). Re-applied on reset().
