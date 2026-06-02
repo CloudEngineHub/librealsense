@@ -66,16 +66,23 @@ def test_auto_exposure_toggle_one_device(test_device):
 
 
 def test_auto_exposure_two_devices(test_device):
-    _, ctx = test_device
+    dev, ctx = test_device
+    sn = dev.get_info(rs.camera_info.serial_number)
 
     # Scenario 2: 2 device instances (s1 and s2) pointing to the same physical sensor.
     # Each instance has its own independent SW cache for the limit value.
     # The exposure limit value is cached in SW and is only applied to HW when the toggle
     # is turned ON. Reading the limit while the toggle is OFF returns the current HW value,
     # not the SW cached value.
-    device1 = ctx.query_devices().front()
+    # On hubless multi-device rigs (e.g. Jetson with D457 + D436) the context sees every
+    # connected device; find the parametrized one by SN rather than using .front().
+    def _find_by_sn():
+        return next(d for d in ctx.query_devices()
+                    if d.supports(rs.camera_info.serial_number)
+                    and d.get_info(rs.camera_info.serial_number) == sn)
+    device1 = _find_by_sn()
     s1 = device1.first_depth_sensor()
-    device2 = ctx.query_devices().front()
+    device2 = _find_by_sn()
     s2 = device2.first_depth_sensor()
 
     option_range = s1.get_option_range(rs.option.auto_exposure_limit)  # same range for both instances
@@ -121,16 +128,23 @@ def test_gain_toggle_one_device(test_device):
 
 
 def test_gain_toggle_two_devices(test_device):
-    _, ctx = test_device
+    dev, ctx = test_device
+    sn = dev.get_info(rs.camera_info.serial_number)
 
     # Scenario 2: 2 device instances (s1 and s2) pointing to the same physical sensor.
     # Each instance has its own independent SW cache for the limit value.
     # The gain limit value is cached in SW and is only applied to HW when the toggle
     # is turned ON. Reading the limit while the toggle is OFF returns the current HW value,
     # not the SW cached value.
-    device1 = ctx.query_devices().front()
+    # On hubless multi-device rigs (e.g. Jetson with D457 + D436) the context sees every
+    # connected device; find the parametrized one by SN rather than using .front().
+    def _find_by_sn():
+        return next(d for d in ctx.query_devices()
+                    if d.supports(rs.camera_info.serial_number)
+                    and d.get_info(rs.camera_info.serial_number) == sn)
+    device1 = _find_by_sn()
     s1 = device1.first_depth_sensor()
-    device2 = ctx.query_devices().front()
+    device2 = _find_by_sn()
     s2 = device2.first_depth_sensor()
 
     option_range = s1.get_option_range(rs.option.auto_gain_limit)  # same range for both instances
