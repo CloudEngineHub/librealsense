@@ -16,7 +16,9 @@ import platform
 import pyrealsense2 as rs
 import pyrsutils as rsutils
 from rspy import log, test, file, repo
+import tempfile
 import time
+import urllib.request
 import argparse
 
 # Parse command-line arguments
@@ -123,6 +125,114 @@ for tool in file.find( repo.build, fw_updater_exe_regex ):
     fw_updater_exe = os.path.join( repo.build, tool )
 if not fw_updater_exe:
     log.f( "Could not find the update tool file (rs-fw-update.exe)" )
+
+
+# Gold signed FW used to recover any D400 device that is in DFU/recovery mode at the
+# start of the test. rs-fw-update's recovery (-r) path only accepts signed FW; using the
+# unsigned --custom-fw-d400 image here would fail with "Unsupported firmware binary image
+# provided - <size> bytes". Fetched from the RealSense releases S3 (same host used by
+# other test-data downloads, e.g. unit-tests/post-processing/test-filters.py).
+_GOLD_D400_FW_URL = "https://librealsense.realsenseai.com/Releases/RS4xx/FW/D4XX_FW_Image-5.17.0.10.bin"
+
+
+def _looks_d400_recovery(d):
+    """True if d is a D400-series device currently in DFU/recovery mode."""
+    if not d.is_in_recovery_mode():
+        return False
+    if d.supports(rs.camera_info.product_line) and d.get_info(rs.camera_info.product_line) == 'D400':
+        return True
+    if d.supports(rs.camera_info.name) and 'D4' in d.get_info(rs.camera_info.name):
+        return True
+    return False
+
+
+def _download_gold_d400_fw():
+    """Download D4XX gold signed FW (5.17.0.10) to a per-process temp cache.
+    Returns the local path, or None on failure."""
+    dest = os.path.join(tempfile.gettempdir(), os.path.basename(_GOLD_D400_FW_URL))
+    if os.path.isfile(dest):
+        log.d(f"gold D400 FW already cached: {dest}")
+        return dest
+    log.d(f"downloading gold D400 FW from {_GOLD_D400_FW_URL}")
+    try:
+        with urllib.request.urlopen(_GOLD_D400_FW_URL) as response, open(dest, 'wb') as out_file:
+            out_file.write(response.read())
+    except Exception as e:
+        log.w(f"failed to download gold D400 FW from S3: {e}")
+        return None
+    log.d(f"saved gold D400 FW to: {dest}")
+    return dest
+
+
+def _reload_d4xx_driver_on_jetson():
+    """On Jetson, the d4xx MIPI driver must be reloaded after a recovery flash so the
+    re-enumerated device shows up. No-op (with a warning) if sudo requires a password."""
+    if 'jetson' not in test.context:
+        return
+    log.d("Reloading d4xx driver on Jetson...")
+    try:
+        rm = subprocess.run(['sudo', '-n', 'modprobe', '-r', 'd4xx'], capture_output=True, text=True)
+        if rm.returncode != 0:
+            log.e("Failed to remove d4xx module (may require passwordless sudo):", rm.stderr)
+            return
+        ld = subprocess.run(['sudo', '-n', 'modprobe', 'd4xx'], capture_output=True, text=True, check=False)
+        if ld.returncode != 0:
+            log.e("Failed to load d4xx module (may require passwordless sudo):",
+                  f"returncode={ld.returncode}, stderr={ld.stderr}")
+    except Exception as e:
+        log.w("Could not reload d4xx driver (passwordless sudo may not be configured):", e)
+
+
+def recover_d400_devices_in_dfu():
+    """Find any D400 devices currently in DFU mode and recover them with the gold signed
+    FW so subsequent test logic can proceed against normal-mode devices.
+
+    Returns a {firmware_update_id: new_serial_number} map for devices we recovered, so
+    the caller can re-pin args.serial when it referred to a now-recovered device.
+    """
+    ctx = rs.context()
+    recovery_devs = [d for d in ctx.devices if _looks_d400_recovery(d)]
+    if not recovery_devs:
+        return {}
+
+    log.i(f"Found {len(recovery_devs)} D400 device(s) in DFU; recovering with gold signed FW")
+    gold_fw = _download_gold_d400_fw()
+    if gold_fw is None:
+        log.w("No gold FW available; skipping upfront recovery")
+        return {}
+
+    fwid_to_sn = {}
+    for d in recovery_devs:
+        fwid = d.get_info(rs.camera_info.firmware_update_id)
+        cmd = [fw_updater_exe, '-r', '-f', gold_fw, '-s', fwid]
+        log.d('running:', cmd)
+        result = subprocess.run(cmd)
+        if result.returncode != 0:
+            log.w(f"Failed to recover D400 device {fwid} with gold FW; continuing")
+            continue
+        _reload_d4xx_driver_on_jetson()
+        # Give the device time to re-enumerate in normal mode before we query it.
+        time.sleep(5)
+        # asic_serial (firmware_update_id) is stable across DFU<->normal, so we can find
+        # the now-normal device by the same FWID we used during DFU.
+        for d2 in rs.context().devices:
+            if d2.supports(rs.camera_info.firmware_update_id) \
+               and d2.get_info(rs.camera_info.firmware_update_id) == fwid \
+               and d2.supports(rs.camera_info.serial_number):
+                fwid_to_sn[fwid] = d2.get_info(rs.camera_info.serial_number)
+                log.d(f"D400 recovered: FWID {fwid} -> SN {fwid_to_sn[fwid]}")
+                break
+    return fwid_to_sn
+
+
+# Run the upfront gold-FW recovery so any DFU-mode D400 is back in normal mode before
+# the test proper starts. Re-pin args.serial if it referenced a now-recovered device
+# (the harness passes the FWID in that case; after recovery the device's
+# serial_number identifier is different).
+_recovered_fwid_to_sn = recover_d400_devices_in_dfu()
+if args.serial in _recovered_fwid_to_sn:
+    log.d(f"re-pinning args.serial: {args.serial} (FWID) -> {_recovered_fwid_to_sn[args.serial]} (SN)")
+    args.serial = _recovered_fwid_to_sn[args.serial]
 
 device, ctx = test.find_first_device_or_exit( args.serial )
 product_line = device.get_info( rs.camera_info.product_line )
