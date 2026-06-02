@@ -58,6 +58,9 @@ def test_pipeline_first_depth_frame_delay(pipeline_device):
     log.info(f"Testing pipeline first depth frame delay on {product_name} device - {os_name} OS")
 
     depth_cfg = rs.config()
+    # On hubless multi-device rigs (e.g. Jetson with D457 + D436) the context sees every
+    # connected device; without enable_device(sn) the pipeline picks the first match.
+    depth_cfg.enable_device(dev.get_info(rs.camera_info.serial_number))
     depth_cfg.enable_stream(rs.stream.depth, rs.format.z16, 30)
 
     frame_delay = time_to_first_frame(ctx, depth_cfg)
@@ -85,6 +88,9 @@ def test_pipeline_first_color_frame_delay(pipeline_device):
     log.info(f"Testing pipeline first color frame delay on {product_name} device - {os_name} OS")
 
     color_cfg = rs.config()
+    # On hubless multi-device rigs (e.g. Jetson with D457 + D436) the context sees every
+    # connected device; without enable_device(sn) the pipeline picks the first match.
+    color_cfg.enable_device(dev.get_info(rs.camera_info.serial_number))
     color_cfg.enable_stream(rs.stream.color, rs.format.rgb8, 30)
 
     frame_delay = time_to_first_frame(ctx, color_cfg)
