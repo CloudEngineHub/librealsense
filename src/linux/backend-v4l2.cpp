@@ -2332,24 +2332,6 @@ namespace librealsense
             if (!pend_for_ctrl_status_event())
                 return false;
 
-            // Switching the UVC exposure control from auto to manual mode does not, by itself, make the
-            // device re-apply the manual exposure value to the sensor: it keeps streaming with the last
-            // auto-computed exposure even though V4L2_CID_EXPOSURE_ABSOLUTE (and the frame metadata) still
-            // report the manually-set value. Re-write the current exposure value to force the device to
-            // apply it, so the stream brightness matches the reported exposure (as done on Windows).
-            if (opt == RS2_OPTION_ENABLE_AUTO_EXPOSURE && value == 0)
-            {
-                int32_t exposure = 0;
-                if (get_pu(RS2_OPTION_EXPOSURE, exposure))
-                {
-                    LOG_DEBUG("Re-applying manual exposure " << exposure << " after AE disable (v4l_uvc_device)");
-                    if (!set_pu(RS2_OPTION_EXPOSURE, exposure))
-                    {
-                        LOG_WARNING("Re-applying manual exposure after AE disable failed (v4l_uvc_device)");
-                    }
-                }
-            }
-
             return true;
         }
 
@@ -3056,24 +3038,6 @@ namespace librealsense
                 throw linux_backend_exception(rsutils::string::from()
                                               << "xioctl(VIDIOC_S_EXT_CTRLS) failed on option " << rs2_option_to_string(opt)
                                               << ", value=" << value << ", errno=" << errno );
-            }
-
-            // Switching the exposure control from auto to manual mode does not, by itself, make the
-            // device re-apply the manual exposure value to the sensor: it keeps streaming with the last
-            // auto-computed exposure even though the control (and the frame metadata) still report the
-            // manually-set value. Re-write the current exposure value to force the device to apply it,
-            // so the stream brightness matches the reported exposure (as done on Windows).
-            if (opt == RS2_OPTION_ENABLE_AUTO_EXPOSURE && value == 0)
-            {
-                int32_t exposure = 0;
-                if (get_pu(RS2_OPTION_EXPOSURE, exposure))
-                {
-                    LOG_DEBUG("Re-applying manual exposure " << exposure << " after AE disable (v4l_mipi_device)");
-                    if (!set_pu(RS2_OPTION_EXPOSURE, exposure))
-                    {
-                        LOG_WARNING("Re-applying manual exposure after AE disable failed (v4l_mipi_device)");
-                    }
-                }
             }
 
             return true;

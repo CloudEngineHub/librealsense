@@ -7,8 +7,28 @@
 #include "core/video.h"
 #include "ds-device-common.h"
 
+#include <src/platform/uvc-option.h>
+
 namespace librealsense
 {
+    // UVC PU auto-exposure control that preserves the current exposure value across
+    // the AE-off transition. Switching the UVC AE control from auto to manual does not,
+    // by itself, guarantee that the device re-applies a sensible exposure to the sensor:
+    // on some backends the stream brightness can jump or the device keeps the last
+    // auto-computed exposure even though the reported value differs. Capturing the
+    // exposure before disabling AE and re-writing it after forces the device to apply it.
+    class uvc_pu_auto_exposure_option : public uvc_pu_option
+    {
+    public:
+        uvc_pu_auto_exposure_option( const std::weak_ptr< uvc_sensor > & ep,
+                                     const std::weak_ptr< option > & exposure_option );
+
+        void set( float value ) override;
+
+    private:
+        std::weak_ptr< option > _exposure_option;
+    };
+
     class ds_color_common
     {
     public:
