@@ -19,7 +19,6 @@ export function DevicePanel() {
     resetDevice,
     error,
     clearError,
-    isAnyDeviceStreaming,
     updateStreamConfig,
     updateSensorConfig,
     setOption,
@@ -30,16 +29,9 @@ export function DevicePanel() {
 
   const [toasts, setToasts] = useState<Toast[]>([])
 
-  const isStreaming = isAnyDeviceStreaming()
-
   useEffect(() => {
     fetchDevices()
-    // Only poll for device changes when NOT streaming (polling causes frame hiccups)
-    if (!isStreaming) {
-      const interval = setInterval(fetchDevices, 5000)
-      return () => clearInterval(interval)
-    }
-  }, [fetchDevices, isStreaming])
+  }, [fetchDevices])
 
   const addToast = (type: ToastType, message: string) => {
     const id = Date.now().toString()
