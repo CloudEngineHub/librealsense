@@ -18,6 +18,7 @@ and/or SDK.
 
 - [What's Included](#whats-included)
 - [Installation](#installation)
+- [RealSense Viewer — Min-Z Post-Processing Filter](#realsense-viewer--min-z-post-processing-filter)
 - [Running the Bundled Examples](#running-the-bundled-examples)
   - [Python (headless stats): `range_depth.py`](#python-headless-stats-range_depthpy)
   - [Python (live windowed compare): `live_minz_compare.py`](#python-live-windowed-compare-live_minz_comparepy)
@@ -58,6 +59,19 @@ Everything installs to `/opt/librealsense2-enhanced-depth/`. No venv needed — 
 
 The deb depends on `librealsense2` (≥ matching version) — install both from the
 same Artifactory / apt source so the SONAMEs line up.
+
+---
+
+## RealSense Viewer — Min-Z Post-Processing Filter
+
+When the viewer is built with `-DBUILD_WITH_MINZ=ON` and the
+`librealsense2-enhanced-depth` package is installed, a **Min-Z Improvement**
+toggle appears in the **Post-Processing** panel for depth sensors.
+Enable Depth, IR Left, and IR Right streams at 640×480 or higher, then switch
+the toggle on — the filter runs automatically before decimation on every
+frameset. The toggle is greyed out with an explanatory tooltip if the library
+is not found at runtime, CUDA is unavailable, or the required streams are not
+active.
 
 ---
 
