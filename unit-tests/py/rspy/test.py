@@ -157,7 +157,7 @@ def find_first_device_or_exit( serial_number=None ):
                 log.d( 'found', d )
                 log.d( 'in', rs )
                 return d, c
-        log.f( f"No device matches serial number / firmware_update_id {serial_number}" )
+        log.f( f"No device with serial number / firmware-update ID '{serial_number}' is visible" )
     dev = c.devices[0]
     log.d( 'found', dev )
     log.d( 'in', rs )

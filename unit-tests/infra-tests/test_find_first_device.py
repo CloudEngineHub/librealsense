@@ -13,7 +13,6 @@ two devices were left in recovery on a multi-device rig.
 """
 
 import pytest
-from unittest.mock import MagicMock
 
 rs = pytest.importorskip("pyrealsense2")
 
@@ -126,16 +125,21 @@ class TestFindFirstDeviceOrExit:
         dev_b, _ = rspy_test.find_first_device_or_exit(serial_number="222-fwid")
         assert dev_b is d_recovery
 
-    def test_serial_takes_precedence_over_firmware_update_id(self, _patch_context):
-        """A device that exposes BOTH should match against serial_number first."""
+    def test_serial_takes_precedence_over_firmware_update_id(self, _patch_context, _silence_log_f):
+        """A device that exposes BOTH should match against serial_number, and must NOT
+        also be matchable via its firmware_update_id value -- otherwise a SN that happens
+        to collide with another device's fwid would resolve to the wrong handle."""
         d = FakePyrsDevice(sn="sn-value", fwid="fwid-value")
         _patch_context["ctx"] = FakeContext([d])
 
+        # Positive: matches via serial_number.
         dev, _ = rspy_test.find_first_device_or_exit(serial_number="sn-value")
         assert dev is d
 
-        # And the same device should NOT match by its fwid when its sn is exposed
-        # (otherwise we'd risk matching collisions in mixed setups).
+        # Negative: searching by the fwid value must NOT find the device, because the
+        # SN-exposed branch wins and returns "sn-value", not "fwid-value".
+        with pytest.raises(_silence_log_f):
+            rspy_test.find_first_device_or_exit(serial_number="fwid-value")
 
     def test_no_match_calls_log_f(self, _patch_context, _silence_log_f):
         """No device with the requested SN or fwid -> log.f (test fail)."""
