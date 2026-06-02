@@ -60,7 +60,12 @@ from rspy.pytest.logging_setup import (
 )
 from rspy.pytest.log_live_format import install as install_live_log_format
 from rspy.pytest.cli import consume_legacy_flags, apply_pending_flags
-from rspy.pytest.device_helpers import resolve_device_each_serials, _MISSING_SENTINEL_PREFIX, _SKIP_SENTINEL_PREFIX
+from rspy.pytest.device_helpers import (
+    resolve_device_each_serials,
+    select_target_device,
+    _MISSING_SENTINEL_PREFIX,
+    _SKIP_SENTINEL_PREFIX,
+)
 from rspy.pytest.collection import filter_and_sort_items
 from rspy.pytest.plugins import check_required_plugins
 
@@ -591,22 +596,22 @@ def test_context(module_device_setup):
 
 
 @pytest.fixture(scope="module")
-def test_device(test_context):
-    """Return (device, context) for the first visible device, or fail if none found."""
+def test_device(test_context, module_device_setup):
+    """Return (device, context) for the test's target device, or fail if none found."""
     devices_list = list(test_context.devices)
     if not devices_list:
         pytest.fail("No device available for test")
 
-    dev = devices_list[0]
+    dev = select_target_device(devices_list, module_device_setup)
     log.debug(f"Test using device: {dev.get_info(rs.camera_info.name) if dev.supports(rs.camera_info.name) else 'Unknown'}")
 
     return dev, test_context
 
 
 @pytest.fixture
-def function_scoped_device(test_context):
+def function_scoped_device(test_context, module_device_setup):
     """Function-scoped: re-query the module-scoped ``test_context`` and return a
-    *fresh* device wrapper for the first visible device.  Use this in tests that
+    *fresh* device wrapper for the test's target device.  Use this in tests that
     mutate persistent device state (e.g. HDR sequencer overrides in
     ``pytest-hdr-long.py``) and need each test to start from a new device object,
     even though the underlying ``rs.context()`` is shared across the module.
@@ -619,8 +624,8 @@ def function_scoped_device(test_context):
     if not devices_list:
         pytest.fail("No device available for test")
 
-    dev = devices_list[0]
-    log.debug(f"Test using fresh device handle: " f"{dev.get_info(rs.camera_info.name) if dev.supports(rs.camera_info.name) else 'Unknown'}")
+    dev = select_target_device(devices_list, module_device_setup)
+    log.debug(f"Test using fresh device handle: {dev.get_info(rs.camera_info.name) if dev.supports(rs.camera_info.name) else 'Unknown'}")
 
     return dev
 
