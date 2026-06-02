@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { apiClient } from '../api/client'
 import type { FirmwareState } from '../api/types'
 
@@ -26,8 +26,6 @@ export function FirmwareProgressModal({
   onSuccess,
   onError,
 }: FirmwareProgressModalProps) {
-  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
   useEffect(() => {
     if (!isOpen) return
 
@@ -37,9 +35,6 @@ export function FirmwareProgressModal({
 
     const unsubscribeSuccess = apiClient.onFirmwareSuccess(device.device_id, (fwVersion: string | null) => {
       onSuccess(fwVersion)
-      closeTimerRef.current = setTimeout(() => {
-        onClose()
-      }, 2000)
     })
 
     const unsubscribeError = apiClient.onFirmwareError(device.device_id, (error: string) => {
@@ -50,11 +45,8 @@ export function FirmwareProgressModal({
       unsubscribeProgress()
       unsubscribeSuccess()
       unsubscribeError()
-      if (closeTimerRef.current !== null) {
-        clearTimeout(closeTimerRef.current)
-      }
     }
-  }, [isOpen, device.device_id, onProgressUpdate, onSuccess, onError, onClose])
+  }, [isOpen, device.device_id, onProgressUpdate, onSuccess, onError])
 
   if (!isOpen) return null
 
@@ -136,11 +128,6 @@ export function FirmwareProgressModal({
             )}
           </div>
 
-          {!firmware.last_error && progress < 100 && (
-            <div className="mt-4 p-3 bg-amber-900/40 border border-amber-600 rounded text-amber-200 text-xs">
-              ⚠ Do not disconnect the device during the update
-            </div>
-          )}
         </div>
       </div>
     </>

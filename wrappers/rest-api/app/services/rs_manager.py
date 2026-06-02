@@ -320,7 +320,13 @@ class RealSenseManager:
         self._claim_fw_update_slot(device_id)
         try:
             self._ensure_fw_update_allowed(device_id)
-            fw_image = self._materialize_fw_image(fw_bytes)
+            # pyrealsense2 accepts bytes-like objects; bytearray keeps memory
+            # bounded (list(bytes) would balloon ~28x by boxing each byte).
+            try:
+                fw_image = bytearray(fw_bytes)
+            except Exception as exc:
+                logging.error("Failed to materialize firmware bytes: %s", exc)
+                raise RealSenseError(status_code=400, detail="Invalid firmware payload")
 
             # Re-fetch the device handle directly from the SDK context. The cached
             # `self.devices[device_id]` Python wrapper can outlive its underlying
@@ -455,17 +461,6 @@ class RealSenseManager:
                     status_code=400,
                     detail="Stop all streaming before updating firmware",
                 )
-
-    @staticmethod
-    def _materialize_fw_image(fw_bytes: bytes) -> bytearray:
-        """Convert the raw payload to a bytearray that pyrealsense2 can consume."""
-        # pyrealsense2 accepts bytes-like objects; bytearray keeps memory bounded
-        # (list(bytes) would balloon ~28x by boxing each byte as a Python int).
-        try:
-            return bytearray(fw_bytes)
-        except Exception as exc:
-            logging.error("Failed to materialize firmware bytes: %s", exc)
-            raise RealSenseError(status_code=400, detail="Invalid firmware payload")
 
     @staticmethod
     def _resolve_firmware_update_id(target_dev: rs.device, device_id: str) -> str:
