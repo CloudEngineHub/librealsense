@@ -15,6 +15,18 @@ pytestmark = [pytest.mark.device("D400*")]
 _depth_sensor = None
 
 
+def _find_device_by_sn(ctx, sn):
+    """Look up a fresh rs.device instance in *ctx* matching *sn*.
+
+    Used by the two-instance tests below where we need a second device handle
+    pointing at the same physical sensor as test_device's `dev`. On hubless
+    multi-device rigs the context sees every connected device, so we filter
+    by SN rather than using ctx.query_devices().front()."""
+    return next(d for d in ctx.query_devices()
+                if d.supports(rs.camera_info.serial_number)
+                and d.get_info(rs.camera_info.serial_number) == sn)
+
+
 @pytest.fixture(autouse=True)
 def _require_auto_limit_support(test_device):
     global _depth_sensor
@@ -74,15 +86,9 @@ def test_auto_exposure_two_devices(test_device):
     # The exposure limit value is cached in SW and is only applied to HW when the toggle
     # is turned ON. Reading the limit while the toggle is OFF returns the current HW value,
     # not the SW cached value.
-    # On hubless multi-device rigs (e.g. Jetson with D457 + D436) the context sees every
-    # connected device; find the parametrized one by SN rather than using .front().
-    def _find_by_sn():
-        return next(d for d in ctx.query_devices()
-                    if d.supports(rs.camera_info.serial_number)
-                    and d.get_info(rs.camera_info.serial_number) == sn)
-    device1 = _find_by_sn()
+    device1 = _find_device_by_sn(ctx, sn)
     s1 = device1.first_depth_sensor()
-    device2 = _find_by_sn()
+    device2 = _find_device_by_sn(ctx, sn)
     s2 = device2.first_depth_sensor()
 
     option_range = s1.get_option_range(rs.option.auto_exposure_limit)  # same range for both instances
@@ -136,15 +142,9 @@ def test_gain_toggle_two_devices(test_device):
     # The gain limit value is cached in SW and is only applied to HW when the toggle
     # is turned ON. Reading the limit while the toggle is OFF returns the current HW value,
     # not the SW cached value.
-    # On hubless multi-device rigs (e.g. Jetson with D457 + D436) the context sees every
-    # connected device; find the parametrized one by SN rather than using .front().
-    def _find_by_sn():
-        return next(d for d in ctx.query_devices()
-                    if d.supports(rs.camera_info.serial_number)
-                    and d.get_info(rs.camera_info.serial_number) == sn)
-    device1 = _find_by_sn()
+    device1 = _find_device_by_sn(ctx, sn)
     s1 = device1.first_depth_sensor()
-    device2 = _find_by_sn()
+    device2 = _find_device_by_sn(ctx, sn)
     s2 = device2.first_depth_sensor()
 
     option_range = s1.get_option_range(rs.option.auto_gain_limit)  # same range for both instances
