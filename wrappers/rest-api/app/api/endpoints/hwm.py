@@ -12,7 +12,7 @@ from app.services.rs_manager import RealSenseManager, RealSenseError
 router = APIRouter()
 
 
-@router.post("/{device_id}/hwm", response_model=HwmResponse)
+@router.post("/", response_model=HwmResponse)
 async def send_hwm_command(
     device_id: str,
     request: HwmRequest,

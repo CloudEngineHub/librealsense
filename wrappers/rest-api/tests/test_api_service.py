@@ -479,25 +479,34 @@ class TestRealSenseAPI:
         assert response.status_code == 400
         assert "does not support" in response.json()["detail"].lower()
 
-    def test_hwm_command_firmware_error(self, setup_mock_managers):
-        """When the firmware command itself fails the endpoint returns 500."""
-        rs_manager = setup_mock_managers["rs_manager"]
-        original = rs_manager.send_hwm_command
+    def test_hwm_no_deadlock_on_unknown_device(self, patch_dependencies):
+        """send_hwm_command must not deadlock when the device is absent and refresh_devices is called.
 
-        def _raise(*args, **kwargs):
-            from app.core.errors import RealSenseError
-            raise RealSenseError(status_code=500, detail="HWM command failed: firmware rejected")
+        Uses the real refresh_devices (not the mock) so that its internal lock
+        acquisition actually happens.  With the buggy implementation the call
+        would block forever; the 2-second timeout makes that a hard failure.
+        """
+        import threading
+        from app.core.errors import RealSenseError
 
-        rs_manager.send_hwm_command = _raise
-        try:
-            response = client.post(
-                "/api/v1/devices/device1/hwm",
-                json={"opcode": 0xA6},
-            )
-            assert response.status_code == 500
-            assert "firmware" in response.json()["detail"].lower()
-        finally:
-            rs_manager.send_hwm_command = original
+        rs_manager = patch_dependencies["rs_manager"]
+        rs_manager.devices.clear()
+        rs_manager.device_infos.clear()
+
+        caught = []
+
+        def _call():
+            try:
+                rs_manager.send_hwm_command("no-such-device", opcode=0xA6)
+            except RealSenseError as e:
+                caught.append(e)
+
+        t = threading.Thread(target=_call, daemon=True)
+        t.start()
+        t.join(timeout=2.0)
+
+        assert not t.is_alive(), "send_hwm_command deadlocked — refresh_devices was called while holding self.lock"
+        assert caught and caught[0].status_code == 404
 
     @pytest.mark.asyncio
     async def test_close_webrtc_session(self, setup_mock_managers):

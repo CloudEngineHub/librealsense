@@ -2283,41 +2283,25 @@ class RealSenseManager:
             RealSenseError 400: Device does not support the debug_protocol extension.
             RealSenseError 500: Firmware rejected or failed to execute the command.
         """
+        if device_id not in self.devices:
+            self.refresh_devices()
         with self.lock:
             if device_id not in self.devices:
-                self.refresh_devices()
-                if device_id not in self.devices:
-                    raise RealSenseError(
-                        status_code=404, detail=f"Device {device_id} not found"
-                    )
-
+                raise RealSenseError(
+                    status_code=404, detail=f"Device {device_id} not found"
+                )
             dev = self.devices[device_id]
 
         # is_debug_protocol() is the correct way to check extension support before casting.
         # as_debug_protocol() does not raise when unsupported — it returns an empty handle
         # whose methods would fail later with a harder-to-diagnose error.
-        try:
-            supported = dev.is_debug_protocol()
-        except Exception as e:
-            raise RealSenseError(
-                status_code=500,
-                detail=f"Failed to query debug_protocol support on device {device_id}: {e}",
-            )
-
-        if not supported:
+        if not dev.is_debug_protocol():
             raise RealSenseError(
                 status_code=400,
                 detail=f"Device {device_id} does not support hardware monitor commands",
             )
 
-        try:
-            debug = dev.as_debug_protocol()
-        except Exception as e:
-            raise RealSenseError(
-                status_code=500,
-                detail=f"Failed to obtain debug_protocol handle for device {device_id}: {e}",
-            )
-
+        debug = dev.as_debug_protocol()
         payload = list(data) if data else []
 
         try:
