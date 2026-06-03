@@ -16,6 +16,7 @@ import platform
 import pyrealsense2 as rs
 import pyrsutils as rsutils
 from rspy import log, test, file, repo, fw_compat
+from rspy.timer import Timer
 import time
 import argparse
 
@@ -177,9 +178,10 @@ if device.is_in_recovery_mode():
         # harness was tracking. Poll for the device to re-enumerate in normal mode
         # (a fresh rs.context() needs time after rs-fw-update exits) -- up to 60s.
         log.d( "waiting for recovered device to re-enumerate in normal mode..." )
-        deadline = time.time() + 60
         recovered_device = None
-        while time.time() < deadline:
+        timer = Timer( 60 )
+        timer.start()
+        while not timer.has_expired():
             for d in rs.context().devices:
                 if d.supports( rs.camera_info.firmware_update_id ) \
                    and d.get_info( rs.camera_info.firmware_update_id ) == args.serial \
@@ -191,7 +193,7 @@ if device.is_in_recovery_mode():
             time.sleep( 2 )
         if recovered_device is None:
             log.f( f"Recovered device with firmware_update_id '{args.serial}' did not "
-                   f"re-enumerate within 60s after gold FW flash" )
+                   f"re-enumerate within {timer.get_timeout()}s after gold FW flash" )
         # Re-pin args.serial to the device's normal-mode SN so downstream
         # rs-fw-update -s <sn> finds the device (rs-fw-update.cpp:480 uses SN when supported).
         if recovered_device.supports( rs.camera_info.serial_number ):

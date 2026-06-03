@@ -19,38 +19,60 @@ import json
 import os
 import re
 import subprocess
-import tempfile
-import time
 import urllib.request
 
-from rspy import log
+from rspy import log, libci
 
 
 _FALLBACK_JSON = os.path.join( os.path.dirname( __file__ ), 'fw_fallback.json' )
 
 
-# Gold signed D400 FW pulled from the RealSense releases S3 (same host pattern as other
-# test-data downloads, e.g. unit-tests/post-processing/test-filters.py). Used as a
-# recovery image for any D400 device that's in DFU mode -- rs-fw-update's recovery (-r)
-# path only accepts signed FW, so we can't reuse the unsigned --custom-fw-d400 path.
-GOLD_D400_FW_URL = "https://librealsense.realsenseai.com/Releases/RS4xx/FW/D4XX_FW_Image-5.17.0.10.bin"
+def _load_gold_recovery_fw_map():
+    """Read fw_fallback.json -> dict[product_line -> URL]. Returns {} on any error.
+    Gold recovery images live in a `gold_recovery_fw` section alongside `fallbacks`."""
+    try:
+        with open( _FALLBACK_JSON, 'r' ) as f:
+            data = json.load( f )
+    except (FileNotFoundError, ValueError, OSError) as e:
+        log.w( f'[fw-gate] could not load {_FALLBACK_JSON}: {e}' )
+        return {}
+    return data.get( 'gold_recovery_fw', {} )
 
 
 def download_gold_d400_fw():
-    """Download the D4XX gold signed FW (5.17.0.10) to a per-process temp cache.
-    Returns the local path, or None on failure."""
-    dest = os.path.join(tempfile.gettempdir(), os.path.basename(GOLD_D400_FW_URL))
-    if os.path.isfile(dest):
-        log.d(f"gold D400 FW already cached: {dest}")
-        return dest
-    log.d(f"downloading gold D400 FW from {GOLD_D400_FW_URL}")
-    try:
-        with urllib.request.urlopen(GOLD_D400_FW_URL) as response, open(dest, 'wb') as out_file:
-            out_file.write(response.read())
-    except Exception as e:
-        log.w(f"failed to download gold D400 FW from S3: {e}")
+    """Return a local path to the D400 gold signed FW image.
+
+    Used as a recovery image for any D400 device in DFU mode; rs-fw-update's
+    recovery (-r) path only accepts signed FW, so we can't reuse the unsigned
+    --custom-fw-d400 path. The URL is configured in fw_fallback.json under
+    `gold_recovery_fw.D400` so it can be updated without touching code.
+
+    The image is cached under libci.home (persistent across reboots) and only
+    re-downloaded if missing on disk. Returns the local path, or None on failure.
+    """
+    url = _load_gold_recovery_fw_map().get( 'D400' )
+    if not url:
+        log.w( "fw_fallback.json has no gold_recovery_fw.D400 entry" )
         return None
-    log.d(f"saved gold D400 FW to: {dest}")
+    # Co-locate with the D400 fallback signed images, under libci.home.
+    cache_dir = os.path.join( libci.home, 'data', 'FW', 'D400' )
+    dest = os.path.join( cache_dir, os.path.basename( url ) )
+    if os.path.isfile( dest ):
+        log.d( f"gold D400 FW already cached: {dest}" )
+        return dest
+    try:
+        os.makedirs( cache_dir, exist_ok=True )
+    except OSError as e:
+        log.w( f"could not create cache directory {cache_dir}: {e}" )
+        return None
+    log.d( f"downloading gold D400 FW from {url}" )
+    try:
+        with urllib.request.urlopen( url ) as response, open( dest, 'wb' ) as out_file:
+            out_file.write( response.read() )
+    except Exception as e:
+        log.w( f"failed to download gold D400 FW from S3: {e}" )
+        return None
+    log.d( f"saved gold D400 FW to: {dest}" )
     return dest
 
 
