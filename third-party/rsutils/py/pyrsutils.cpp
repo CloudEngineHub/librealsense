@@ -9,6 +9,9 @@
 #include <rsutils/version.h>
 #include <rsutils/number/running-average.h>
 #include <rsutils/number/stabilized-value.h>
+#include <rsutils/time/stopwatch.h>
+#include <rsutils/time/timer.h>
+#include <rsutils/time/periodic-timer.h>
 #include <rsutils/os/executable-name.h>
 #include <rsutils/os/special-folder.h>
 #include <rsutils/type/eth-config.h>
@@ -156,6 +159,42 @@ PYBIND11_MODULE(NAME, m) {
         .def( "clear", &stabilized_value::clear )
         .def( "to_string", to_string )
         .def( "__str__", to_string );
+
+    // Helpers to bridge std::chrono <-> python float seconds
+    auto to_seconds = []( rsutils::time::clock::duration d ) -> double {
+        return std::chrono::duration< double >( d ).count();
+    };
+    auto from_seconds = []( double s ) -> rsutils::time::clock::duration {
+        return std::chrono::duration_cast< rsutils::time::clock::duration >( std::chrono::duration< double >( s ) );
+    };
+
+    using rsutils::time::stopwatch;
+    py::class_< stopwatch >( m, "stopwatch" )
+        .def( py::init<>() )
+        .def( "reset", []( stopwatch & self ) { self.reset(); } )
+        .def( "get_start",
+              [to_seconds]( stopwatch const & self ) { return to_seconds( self.get_start().time_since_epoch() ); } )
+        .def( "get_elapsed", [to_seconds]( stopwatch const & self ) { return to_seconds( self.get_elapsed() ); } )
+        .def( "get_elapsed_ms", &stopwatch::get_elapsed_ms );
+
+    using rsutils::time::timer;
+    py::class_< timer >( m, "timer" )
+        .def( py::init( [from_seconds]( double timeout ) { return std::make_unique< timer >( from_seconds( timeout ) ); } ),
+              py::arg( "timeout" ) )
+        .def( "start", &timer::start )
+        .def( "reset",
+              [from_seconds]( timer & self, double new_timeout ) { self.reset( from_seconds( new_timeout ) ); },
+              py::arg( "timeout" ) )
+        .def( "has_expired", &timer::has_expired )
+        .def( "set_expired", &timer::set_expired )
+        .def( "time_left", [to_seconds]( timer const & self ) { return to_seconds( self.time_left() ); } );
+
+    using rsutils::time::periodic_timer;
+    py::class_< periodic_timer >( m, "periodic_timer" )
+        .def( py::init( [from_seconds]( double delta ) { return std::make_unique< periodic_timer >( from_seconds( delta ) ); } ),
+              py::arg( "delta" ) )
+        .def( "__bool__", []( periodic_timer const & self ) { return static_cast< bool >( self ); } )
+        .def( "set_expired", &periodic_timer::set_expired );
 
     py::enum_< rsutils::os::special_folder >( m, "special_folder" )
         .value( "app_data", rsutils::os::special_folder::app_data )
