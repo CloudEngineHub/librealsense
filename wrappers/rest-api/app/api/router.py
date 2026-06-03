@@ -31,7 +31,7 @@ async def health_check():
     """
     return {"status": "ok", "service": "realsense-api", "sdk_version": _SDK_VERSION}
 
-# Register firmware and hwm routes before devices to avoid conflicts with /{device_id} catch-all
+# Register firmware route before devices to avoid conflicts with /{device_id} catch-all
 api_router.include_router(firmware.router, prefix="/devices", tags=["firmware"])
 api_router.include_router(devices.router, prefix="/devices", tags=["devices"])
 api_router.include_router(sensors.router, prefix="/devices/{device_id}/sensors", tags=["sensors"])
