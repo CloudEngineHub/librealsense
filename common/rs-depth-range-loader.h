@@ -2,7 +2,7 @@
 // Copyright(c) 2026 RealSense, Inc. All Rights Reserved.
 
 #pragma once
-#ifdef BUILD_WITH_MINZ
+#ifdef BUILD_WITH_CLOSE_RANGE_DEPTH
 
 #include <rs_depth_calibration.hpp>
 #include <rs_depth_range.hpp>  // FrameMetadata and extern "C" function declarations
@@ -34,7 +34,7 @@ public:
                                 RTLD_LAZY | RTLD_LOCAL );
         if( ! _handle )
         {
-            LOG_WARNING( "MinZ: dlopen(librs_depth_range.so) failed: " << ::dlerror() );
+            LOG_WARNING( "Close Range Depth: dlopen(librs_depth_range.so) failed: " << ::dlerror() );
             return;
         }
 
@@ -49,7 +49,7 @@ public:
 
         if( ! _create || ! _destroy || ! _process || ! _last_error )
         {
-            LOG_WARNING( "MinZ: missing symbols in librs_depth_range.so: " << ::dlerror() );
+            LOG_WARNING( "Close Range Depth: missing symbols in librs_depth_range.so: " << ::dlerror() );
             ::dlclose( _handle );
             _handle     = nullptr;
             _create     = nullptr;
@@ -136,4 +136,4 @@ private:
     void * _handle = nullptr;
 };
 
-#endif  // BUILD_WITH_MINZ
+#endif  // BUILD_WITH_CLOSE_RANGE_DEPTH
