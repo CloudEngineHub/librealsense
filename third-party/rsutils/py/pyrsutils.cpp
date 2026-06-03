@@ -141,30 +141,13 @@ PYBIND11_MODULE(NAME, m) {
               } )
         .def( "add", &double_avg::add );
 
-    using stabilized_value = rsutils::number::stabilized_value< double >;
-    auto not_empty = []( stabilized_value const & self ) {
-        return ! self.empty();
-    };
-    auto to_string = []( stabilized_value const & self ) -> std::string {
-        if( self.empty() )
-            return "EMPTY";
-        return rsutils::string::from( self.get() );
-    };
-    py::class_< stabilized_value >( m, "stabilized_value" )
-        .def( py::init< size_t >() )
-        .def( "empty", &stabilized_value::empty )
-        .def( "__bool__", not_empty )
-        .def( "add", &stabilized_value::add )
-        .def( "get", &stabilized_value::get, py::arg( "stabilization-percent" ) = 0.75 )
-        .def( "clear", &stabilized_value::clear )
-        .def( "to_string", to_string )
-        .def( "__str__", to_string );
-
     // Helpers to bridge std::chrono <-> python float seconds
-    auto to_seconds = []( rsutils::time::clock::duration d ) -> double {
+    auto to_seconds = []( rsutils::time::clock::duration d ) -> double
+    {
         return std::chrono::duration< double >( d ).count();
     };
-    auto from_seconds = []( double s ) -> rsutils::time::clock::duration {
+    auto from_seconds = []( double s ) -> rsutils::time::clock::duration
+    {
         return std::chrono::duration_cast< rsutils::time::clock::duration >( std::chrono::duration< double >( s ) );
     };
 
