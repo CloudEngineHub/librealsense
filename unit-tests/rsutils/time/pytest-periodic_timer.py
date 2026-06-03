@@ -14,7 +14,7 @@ def test_periodic_time_expiration():
     pt = periodic_timer( TEST_DELTA_TIME )
     for i in range( 5 ):
         check.is_false( bool( pt ) )
-        time.sleep( TEST_DELTA_TIME )
+        time.sleep( TEST_DELTA_TIME + 0.1 ) # At GHA scope sleep might be less accurate and wakeup just before TEST_DELTA_TIME have passed
         check.is_true( bool( pt ) )
 
     check.is_false( bool( pt ) )

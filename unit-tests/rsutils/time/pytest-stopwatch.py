@@ -20,7 +20,7 @@ def test_stopwatch():
     check.less( sw.get_elapsed(), TEST_DELTA_TIME )
 
     # Sleep for verifying progress of time
-    time.sleep( TEST_DELTA_TIME )
+    time.sleep( TEST_DELTA_TIME + 0.1 ) # At GHA scope sleep might be less accurate and wakeup just before TEST_DELTA_TIME have passed
 
     # Check elapsed() function
     check.greater( sw.get_elapsed(), TEST_DELTA_TIME )
