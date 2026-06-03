@@ -25,38 +25,24 @@ namespace librealsense
 
     void uvc_pu_auto_exposure_option::set( float value )
     {
-        // Capture the current exposure BEFORE switching AE off so the value is preserved
-        // across the transition (the underlying backend may otherwise leave the device at
-        // an arbitrary value once AE is turned off).
-        float saved_exposure = 0;
-        auto exposure = _exposure_option.lock();
-        bool reapply = ( value == 0 ) && exposure;
-        if( reapply )
-        {
-            try
-            {
-                saved_exposure = exposure->query();
-            }
-            catch( const std::exception & e )
-            {
-                LOG_WARNING( "Query exposure before AE disable failed: " << e.what() );
-                reapply = false;
-            }
-        }
-
         uvc_pu_option::set( value );
 
-        if( reapply )
+        if( value != 0 )
+            return;
+
+        auto exposure = _exposure_option.lock();
+        if( ! exposure )
+            return;
+
+        try
         {
-            try
-            {
-                LOG_DEBUG( "Re-applying exposure " << saved_exposure << " after AE disable" );
-                exposure->set( saved_exposure );
-            }
-            catch( const std::exception & e )
-            {
-                LOG_WARNING( "Re-applying exposure after AE disable failed: " << e.what() );
-            }
+            float def_exposure = exposure->get_range().def;
+            LOG_DEBUG( "Applying default exposure " << def_exposure << " after AE disable" );
+            exposure->set( def_exposure );
+        }
+        catch( const std::exception & e )
+        {
+            LOG_WARNING( "Applying default exposure after AE disable failed: " << e.what() );
         }
     }
 

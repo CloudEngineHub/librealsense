@@ -11,12 +11,11 @@
 
 namespace librealsense
 {
-    // UVC PU auto-exposure control that preserves the current exposure value across
-    // the AE-off transition. Switching the UVC AE control from auto to manual does not,
-    // by itself, guarantee that the device re-applies a sensible exposure to the sensor:
-    // on some backends the stream brightness can jump or the device keeps the last
-    // auto-computed exposure even though the reported value differs. Capturing the
-    // exposure before disabling AE and re-writing it after forces the device to apply it.
+    // UVC PU auto-exposure control that writes the default exposure value after AE is
+    // disabled. Switching the UVC AE control from auto to manual does not, by itself,
+    // make the device re-apply a manual exposure value: on some backends it keeps the
+    // last auto-computed exposure even though the reported value differs. Writing the
+    // default exposure forces the device to apply a known manual value.
     class uvc_pu_auto_exposure_option : public uvc_pu_option
     {
     public:
