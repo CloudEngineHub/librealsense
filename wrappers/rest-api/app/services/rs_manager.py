@@ -2255,6 +2255,64 @@ class RealSenseManager:
             
             return queue[-1]
 
+    def send_hwm_command(
+        self,
+        device_id: str,
+        opcode: int,
+        param1: int = 0,
+        param2: int = 0,
+        param3: int = 0,
+        param4: int = 0,
+        data: Optional[List[int]] = None,
+    ) -> List[int]:
+        """Send a hardware monitor (HWM) command and return the raw firmware response.
+
+        Uses the SDK debug_protocol extension to build and transmit the command.
+
+        Args:
+            device_id: Serial number of the target device.
+            opcode: HWM opcode (e.g. 0x10 for GVD).
+            param1..param4: Optional command parameters (default 0).
+            data: Optional payload bytes appended after the header.
+
+        Returns:
+            Raw firmware response as a list of int byte values.
+
+        Raises:
+            RealSenseError 404: Device not found.
+            RealSenseError 400: Device does not support the debug_protocol extension.
+            RealSenseError 500: Firmware rejected or failed to execute the command.
+        """
+        if device_id not in self.devices:
+            self.refresh_devices()
+        with self.lock:
+            if device_id not in self.devices:
+                raise RealSenseError(
+                    status_code=404, detail=f"Device {device_id} not found"
+                )
+            dev = self.devices[device_id]
+
+        # is_debug_protocol() is the correct way to check extension support before casting.
+        # as_debug_protocol() does not raise when unsupported — it returns an empty handle
+        # whose methods would fail later with a harder-to-diagnose error.
+        if not dev.is_debug_protocol():
+            raise RealSenseError(
+                status_code=400,
+                detail=f"Device {device_id} does not support hardware monitor commands",
+            )
+
+        debug = dev.as_debug_protocol()
+        payload = list(data) if data else []
+
+        try:
+            cmd = debug.build_command(opcode, param1, param2, param3, param4, payload)
+            raw_response = debug.send_and_receive_raw_data(cmd)
+            return list(raw_response)
+        except Exception as e:
+            raise RealSenseError(
+                status_code=500, detail=f"HWM command failed: {e}"
+            )
+
     def get_sensor_metadata(
         self,
         device_id: str,
