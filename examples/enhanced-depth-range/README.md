@@ -65,7 +65,9 @@ same Artifactory / apt source so the SONAMEs line up.
 ## RealSense Viewer — Min-Z Post-Processing Filter
 
 When the viewer is built with `-DBUILD_WITH_MINZ=ON` and the
-`librealsense2-enhanced-depth` package is installed, a Min-Z Improvement toggle appears in the Post-Processing panel for depth sensors. Enable Depth, IR Left, and IR Right streams at 640×480 or higher, then switch
+`librealsense2-enhanced-depth` package is installed, a Min-Z Improvement toggle appears in the Post-Processing panel for depth sensors.
+`BUILD_WITH_MINZ` is an ARM64-only CMake option (Jetson / aarch64 builds); it is not available on x86 builds.
+Enable Depth, IR Left, and IR Right streams at 640×480 or higher, then switch
 the toggle on — the filter runs automatically before decimation on every frameset. The toggle is greyed out if the library is not found at runtime, CUDA is unavailable, or the required streams are not
 active.
 
