@@ -79,12 +79,15 @@ def draw_debug(frame_bgr, a4_page_bgr):
     return np.hstack([left, right])
 
 
-def run_test(ctx, resolution, fps):
+def run_test(dev, ctx, resolution, fps):
     log.info(f"Basic Color Image Quality Test: {resolution[0]}x{resolution[1]} @ {fps}fps")
     color_match_count = {color: 0 for color in expected_colors.keys()}
     color_sums = {color: np.zeros(3, dtype=int) for color in expected_colors.keys()}
     pipeline = rs.pipeline(ctx)
     cfg = rs.config()
+    # On hubless multi-device rigs (e.g. Jetson with D457 + D436) the context sees every
+    # connected device; without enable_device(sn) the pipeline picks the first match.
+    cfg.enable_device(dev.get_info(rs.camera_info.serial_number))
     cfg.enable_stream(rs.stream.color, resolution[0], resolution[1], rs.format.bgr8, fps)
     if not cfg.can_resolve(pipeline):
         log.info(f"Configuration {resolution[0]}x{resolution[1]}@{fps}fps is not supported by the device")
@@ -170,4 +173,4 @@ def test_basic_color(test_device, test_context_var):
         ]
 
     for resolution, fps in configurations:
-        run_test(ctx, resolution, fps)
+        run_test(dev, ctx, resolution, fps)

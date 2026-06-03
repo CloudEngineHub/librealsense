@@ -101,6 +101,45 @@ class RealSenseManager:
         # Initialize devices
         self.refresh_devices()
 
+        # Refresh devices when one is plugged in or out.
+        self.ctx.set_devices_changed_callback(self._on_devices_changed)
+
+    def _on_devices_changed(self, info) -> None:
+        """rs.context devices-changed callback. Runs on a pyrealsense2 internal thread."""
+        added: List[str] = []
+        for dev in info.get_new_devices():
+            if dev.supports(rs.camera_info.serial_number):
+                added.append(dev.get_info(rs.camera_info.serial_number))
+
+        removed: List[str] = []
+        with self.lock:
+            for serial, dev in list(self.devices.items()):
+                if info.was_removed(dev):
+                    removed.append(serial)
+            # Drop cached devices so the next /devices call re-enumerates.
+            self.device_infos.clear()
+            for serial in removed:
+                self._remove_device(serial)
+            self._supported_md_by_profile.clear()
+
+        if removed and self.metadata_socket_server._target_device_id in removed:
+            self.metadata_socket_server.stop_broadcast()
+
+        if added or removed:
+            logging.info("devices_changed: +%s -%s", added, removed)
+        self._emit_socket_event("devices_changed", {"added": added, "removed": removed})
+
+    def _remove_device(self, serial: str) -> None:
+        assert self.lock.locked(), "_remove_device called without self.lock held"
+        self.pipelines.pop(serial, None)
+        self.configs.pop(serial, None)
+        self.active_streams.pop(serial, None)
+        self.frame_queues.pop(serial, None)
+        self.metadata_queues.pop(serial, None)
+        self.depth_frames.pop(serial, None)
+        self.devices.pop(serial, None)
+        self.streaming_mode.pop(serial, None)
+
     def _emit_socket_event(self, event: str, payload: Dict[str, Any]) -> None:
         """Emit a Socket.IO event from sync contexts using the main FastAPI event loop."""
         loop = RealSenseManager._main_loop

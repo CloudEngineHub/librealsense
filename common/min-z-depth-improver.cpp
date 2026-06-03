@@ -4,10 +4,7 @@
 #include "min-z-depth-improver.h"
 
 #ifdef BUILD_WITH_MINZ
-#include <rs_depth_calibration.hpp>
-#include <rs_depth_range.hpp>
-#include <rsutils/easylogging/easyloggingpp.h>
-#include <cstring>
+#include "rs-depth-range-loader.h"  // pulls in calibration headers + easylogging
 #include <cmath>
 #include <limits>
 #endif
@@ -18,6 +15,9 @@ min_z_depth_improver::~min_z_depth_improver() = default;
 rs2::frame min_z_depth_improver::apply( rs2::frame f, rs2::frame_source const & src )
 {
 #ifdef BUILD_WITH_MINZ
+    if( _library_absent )
+        return f;
+
     auto fs = f.as< rs2::frameset >();
     if( ! fs )
         return f;
@@ -62,9 +62,15 @@ bool min_z_depth_improver::init( rs2::video_frame const & ir_left,
 
     auto cal = rs_depth::Calibration::from_sdk( intrin, extrin );
 
+    if( ! get_rs_depth_range_loader().is_loaded() )
+    {
+        _library_absent = true;
+        return false;
+    }
+
     try
     {
-        _impl.reset( new rs_depth::DepthRangeImprover( cal ) );
+        _impl.reset( new rs_depth_range_impl( cal ) );
     }
     catch( std::exception const & e )
     {

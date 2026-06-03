@@ -199,9 +199,10 @@ def run_advanced_occ_calibration_test(host_assistance, config, pipeline, calib_d
     return calib_dev, saved_table
 
 def test_advanced_occ_calibration(test_device):
+    dev, _ = test_device
     # mipi devices do not support OCC calibration without host assistance; D555 excluded separately
     # (D555 needs different parsing of calibration tables, SRC and more).
-    if is_mipi_device() or is_d555():
+    if is_mipi_device(dev) or is_d555(dev):
         pytest.skip("Non-mipi non-D555 only — see test_advanced_occ_calibration_with_host_assistance for mipi")
 
     calib_dev = None
@@ -210,7 +211,7 @@ def test_advanced_occ_calibration(test_device):
     try:
         host_assistance = False
         image_width, image_height, fps = (256, 144, 90)
-        config, pipeline, calib_dev = get_calibration_device(image_width, image_height, fps)
+        config, pipeline, calib_dev = get_calibration_device(image_width, image_height, fps, dev=dev)
         restore_calibration_table(calib_dev, None)
         calib_dev, saved_table = run_advanced_occ_calibration_test(host_assistance, config, pipeline, calib_dev, image_width, image_height, fps, modify_ppy=True)
     except Exception as e:
@@ -223,7 +224,8 @@ def test_advanced_occ_calibration(test_device):
 
 
 def test_advanced_occ_calibration_with_host_assistance(test_device):
-    if not is_mipi_device() or is_d555():
+    dev, _ = test_device
+    if not is_mipi_device(dev) or is_d555(dev):
         pytest.skip("Host-assistance OCC calibration only on mipi/GMSL non-D555 devices")
 
     calib_dev = None
@@ -232,7 +234,7 @@ def test_advanced_occ_calibration_with_host_assistance(test_device):
     try:
         host_assistance = True
         image_width, image_height, fps = (1280, 720, 30)
-        config, pipeline, calib_dev = get_calibration_device(image_width, image_height, fps)
+        config, pipeline, calib_dev = get_calibration_device(image_width, image_height, fps, dev=dev)
         restore_calibration_table(calib_dev, None)
         calib_dev, saved_table = run_advanced_occ_calibration_test(host_assistance, config, pipeline, calib_dev, image_width, image_height, fps, modify_ppy=True)
     except Exception as e:

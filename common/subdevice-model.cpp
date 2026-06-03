@@ -5,6 +5,7 @@
 #include "post-processing-block-model.h"
 #ifdef BUILD_WITH_MINZ
 #include "minz-filter.h"
+#include "rs-depth-range-loader.h"
 #endif
 #include <imgui_internal.h>
 #include <realsense_imgui.h>
@@ -130,7 +131,12 @@ namespace rs2
                 [block]( rs2::frame f ) { return block->process( f ); },
                 error_message, false );
 
-            if( !rsutils::rs2_is_cuda_available() )
+            if( ! get_rs_depth_range_loader().is_loaded() )
+            {
+                model->available = []() { return false; };
+                model->unavailable_tooltip = "MinZ library not found; install librealsense2-enhanced-depth package";
+            }
+            else if( !rsutils::rs2_is_cuda_available() )
             {
                 model->available = []() { return false; };
                 model->unavailable_tooltip = "MinZ requires CUDA (not detected on this system)";

@@ -949,13 +949,10 @@ namespace librealsense
                 }
             }
 
-            if (!_is_mipi_device)
-            {
-                depth_sensor.register_option( RS2_OPTION_STEREO_BASELINE,
-                                              std::make_shared< const_value_option >(
-                                                  "Distance in mm between the stereo imagers",
-                                                  rsutils::lazy< float >( [this]() { return get_stereo_baseline_mm(); } ) ) );
-            }
+            depth_sensor.register_option( RS2_OPTION_STEREO_BASELINE,
+                                          std::make_shared< const_value_option >(
+                                              "Distance in mm between the stereo imagers",
+                                              rsutils::lazy< float >( [this]() { return get_stereo_baseline_mm(); } ) ) );
 
             _depth_units_register_action = [this]()
             {

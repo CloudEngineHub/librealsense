@@ -848,7 +848,11 @@ void dds_sensor_proxy::add_option( std::shared_ptr< realdds::dds_option > option
     }
 
     if( get_option_handler( option_id ) )
-        throw std::runtime_error( "option '" + option->get_name() + "' already exists in sensor" );
+    {
+        // Option might already be registered by another stream of this sensor, in that case, we just ignore it.
+        LOG_DEBUG( "option '" + option->get_name() + "' already exists in sensor '" + get_name() + "'" );
+        return;
+    }
 
     //LOG_DEBUG( "... option -> " << option->get_name() );
     auto opt = std::make_shared< rs_dds_option >(
