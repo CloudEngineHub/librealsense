@@ -1,8 +1,22 @@
-import { useMemo } from 'react'
+import { useMemo, useRef, useEffect, memo } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import * as THREE from 'three'
 import { useAppStore } from '../store'
+
+// Round point sprite (built once). Default square points read as a coarse pixel grid;
+// a circular alpha mask + alphaTest makes points blend into a smoother surface.
+const circleSprite = (() => {
+  const s = 64
+  const cv = document.createElement('canvas')
+  cv.width = cv.height = s
+  const ctx = cv.getContext('2d')!
+  ctx.beginPath()
+  ctx.arc(s / 2, s / 2, s / 2 - 2, 0, Math.PI * 2)
+  ctx.fillStyle = '#fff'
+  ctx.fill()
+  return new THREE.CanvasTexture(cv)
+})()
 
 export function PointCloudViewer() {
   const { pointCloudVertices, isStreaming } = useAppStore()
@@ -28,12 +42,14 @@ export function PointCloudViewer() {
       <div className="flex-1 bg-black rounded-b-lg overflow-hidden">
         {pointCloudVertices ? (
           <Canvas>
-            <PerspectiveCamera makeDefault position={[0, 0.3, 0.3]} />
+            {/* Head-on, on the depth optical axis (sensor POV) — matches the C++ viewer's
+                default 3D camera and the 2D framing, so raw-cloud edge artifacts stay
+                behind surfaces instead of reading as floating noise from an oblique angle. */}
+            <PerspectiveCamera makeDefault position={[0, 0, 1]} fov={45} />
             <OrbitControls enablePan enableZoom enableRotate target={[0, 0, -1]} />
             <ambientLight intensity={0.5} />
             <PointCloud vertices={pointCloudVertices} />
-            <Axes />
-            <gridHelper args={[10, 10, '#444', '#333']} />
+            <SceneDecor />
           </Canvas>
         ) : (
           <div className="h-full flex items-center justify-center text-gray-500">
@@ -70,120 +86,189 @@ interface PointCloudProps {
 }
 
 function PointCloud({ vertices }: PointCloudProps) {
-  const geometry = useMemo(() => {
-    const geo = new THREE.BufferGeometry()
-    const n = vertices.length
-    const positions = new Float32Array(n)
-    const colors = new Float32Array(n)
-    const BINS = 64
+  // One persistent geometry with grow-only fixed-capacity attributes. Inspired by the
+  // C++ viewer's upload_points: the GPU buffers are allocated once (regrown only when a
+  // frame needs more room) and rewritten in place every frame — no per-frame BufferGeometry
+  // or BufferAttribute allocation, so no GPU-buffer leak. setDrawRange limits rendering to
+  // the live vertex count, since the point count varies frame to frame.
+  const geometryRef = useRef<THREE.BufferGeometry>()
+  const capacityRef = useRef(0)
+  // EMA-smoothed depth range, derived from robust percentiles of the cloud so the
+  // gradient uses the full blue→red span (farthest points reach red) while staying
+  // temporally stable — and ignoring sparse far outliers that would wash everything blue.
+  const rangeRef = useRef<{ near: number; far: number }>({ near: NaN, far: NaN })
+  const histRef = useRef<Uint32Array>(new Uint32Array(128))
+  if (!geometryRef.current) geometryRef.current = new THREE.BufferGeometry()
+  const geometry = geometryRef.current
 
-    let zMin = Infinity
-    let zMax = -Infinity
+  useEffect(() => {
+    const geo = geometry
+    return () => geo.dispose()
+  }, [geometry])
+
+  useMemo(() => {
+    const geo = geometry
+    const n = vertices.length
+    const count = (n / 3) | 0
+
+    // Grow-only: reallocate buffers only when a frame exceeds current capacity (in vertices).
+    // After the first few frames this stops firing entirely (steady state = no allocation).
+    // Capacity is tracked in vertices so the float arrays stay a multiple of 3 (a fractional
+    // BufferAttribute.count makes computeBoundingSphere read past the array → NaN).
+    if (capacityRef.current < count) {
+      const vcap = count + (count >> 2) + 1 // +25% headroom to avoid frequent regrows
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(vcap * 3), 3))
+      geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(vcap * 3), 3))
+      capacityRef.current = vcap
+    }
+    const posAttr = geo.getAttribute('position') as THREE.BufferAttribute
+    const colAttr = geo.getAttribute('color') as THREE.BufferAttribute
+    const positions = posAttr.array as Float32Array
+    const colors = colAttr.array as Float32Array
+
+    // Robust depth range via a coarse histogram → 2nd/98th percentile, then EMA-smoothed.
+    // Percentiles (not raw min/max) reject sparse far/near outliers that would otherwise
+    // stretch the range and wash the whole scene to one color; EMA keeps it stable.
+    const HMAX = 10 // meters; histogram window
+    const NB = histRef.current.length
+    const hist = histRef.current
+    hist.fill(0)
+    const sc = NB / HMAX
+    let total = 0
     for (let i = 2; i < n; i += 3) {
       const z = vertices[i]
-      if (z < zMin) zMin = z
-      if (z > zMax) zMax = z
+      if (z <= 0) continue
+      let b = (z * sc) | 0
+      if (b >= NB) b = NB - 1
+      hist[b]++
+      total++
     }
-
-    // Histogram + CDF (matches rs.colorizer histogram_eq default) so a few far-z
-    // outliers don't crush the visible scene into a single color band.
-    const cdf = new Float32Array(BINS)
-    const binScale = isFinite(zMin) && zMax > zMin ? BINS / (zMax - zMin) : 0
-    if (binScale > 0) {
-      const hist = new Uint32Array(BINS)
-      for (let i = 2; i < n; i += 3) {
-        let bin = Math.floor((vertices[i] - zMin) * binScale)
-        if (bin >= BINS) bin = BINS - 1
-        else if (bin < 0) bin = 0
-        hist[bin]++
-      }
+    let zlo = NaN
+    let zhi = NaN
+    if (total > 0) {
+      const loT = total * 0.02
+      const hiT = total * 0.98
       let acc = 0
-      for (let b = 0; b < BINS; b++) {
+      let loB = -1
+      let hiB = NB - 1
+      for (let b = 0; b < NB; b++) {
         acc += hist[b]
-        cdf[b] = acc
+        if (loB < 0 && acc >= loT) loB = b
+        if (acc >= hiT) { hiB = b; break }
       }
-      if (acc > 0) for (let b = 0; b < BINS; b++) cdf[b] /= acc
+      if (loB < 0) loB = 0
+      zlo = loB / sc
+      zhi = (hiB + 1) / sc
     }
+    const r = rangeRef.current
+    if (!isFinite(r.near) || !isFinite(r.far)) {
+      r.near = isFinite(zlo) ? zlo : 0
+      r.far = isFinite(zhi) ? zhi : HMAX
+    } else if (isFinite(zlo) && isFinite(zhi) && zhi > zlo) {
+      const A = 0.1 // ~10-frame time constant
+      r.near += (zlo - r.near) * A
+      r.far += (zhi - r.far) * A
+    }
+    const near = r.near
+    const far = r.far
+    const span = far > near ? far - near : 1
+    const invSpan = 1 / span
 
     for (let i = 0; i < n; i += 3) {
       // RealSense: x-right, y-down, z-forward (meters)
       // Three.js:  x-right, y-up,   z-toward-camera
+      const z = vertices[i + 2]
       positions[i] = vertices[i]
       positions[i + 1] = -vertices[i + 1]
-      positions[i + 2] = -vertices[i + 2]
+      positions[i + 2] = -z
 
-      let t = 0
-      if (binScale > 0) {
-        let bin = Math.floor((vertices[i + 2] - zMin) * binScale)
-        if (bin >= BINS) bin = BINS - 1
-        else if (bin < 0) bin = 0
-        t = cdf[bin]
-      }
+      let t = (z - near) * invSpan
+      if (t < 0) t = 0
+      else if (t > 1) t = 1
       const c = jetColor(t)
       colors[i] = c[0]
       colors[i + 1] = c[1]
       colors[i + 2] = c[2]
     }
 
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+    // Only the first `count` vertices are valid this frame; render exactly those.
+    posAttr.needsUpdate = true
+    colAttr.needsUpdate = true
+    geo.setDrawRange(0, count)
     geo.computeBoundingSphere()
-    return geo
   }, [vertices])
 
   return (
     <points geometry={geometry}>
-      <pointsMaterial size={0.005} vertexColors sizeAttenuation />
+      <pointsMaterial
+        size={3}
+        sizeAttenuation={false}
+        vertexColors
+        map={circleSprite}
+        alphaTest={0.5}
+        transparent={false}
+      />
     </points>
   )
 }
 
-// Jet colormap (blue → cyan → green → yellow → red) — matches librealsense rs.colorizer default.
+// Depth colormap matching the 2D view's DepthLegend 'jet' (see DepthLegend.tsx):
+// near = blue → cyan → yellow → red → dark red = far. Linear interpolation between
+// the same 5 stops the legend uses, so 2D and 3D agree.
+const JET_STOPS: [number, number, number][] = [
+  [0, 0, 1],        // near  - blue
+  [0, 1, 1],        //         cyan
+  [1, 1, 0],        //         yellow
+  [1, 0, 0],        //         red
+  [50 / 255, 0, 0], // far   - dark red
+]
 function jetColor(t: number): [number, number, number] {
   const v = Math.min(Math.max(t, 0), 1)
-  if (v < 0.125) return [0, 0, 0.5 + v * 4]
-  if (v < 0.375) return [0, (v - 0.125) * 4, 1]
-  if (v < 0.625) return [(v - 0.375) * 4, 1, 1 - (v - 0.375) * 4]
-  if (v < 0.875) return [1, 1 - (v - 0.625) * 4, 0]
-  return [1 - (v - 0.875) * 4, 0, 0]
+  const seg = v * (JET_STOPS.length - 1)
+  const i = Math.min(Math.floor(seg), JET_STOPS.length - 2)
+  const f = seg - i
+  const a = JET_STOPS[i]
+  const b = JET_STOPS[i + 1]
+  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f]
 }
 
-function Axes() {
+// Module-level constants: stable array identity so r3f never rebuilds these
+// buffers. Previously these were `new Float32Array([...])` inline, which created
+// fresh arrays every render → r3f reconstructed the GPU buffers each frame (leak).
+const AXIS_X = new Float32Array([0, 0, 0, 1, 0, 0])
+const AXIS_Y = new Float32Array([0, 0, 0, 0, 1, 0])
+const AXIS_Z = new Float32Array([0, 0, 0, 0, 0, 1])
+
+// Static scene helpers (axes + grid). memo + no props => rendered exactly once,
+// so their buffers are allocated a single time regardless of parent re-renders.
+const SceneDecor = memo(function SceneDecor() {
   return (
     <group>
       {/* X axis - Red */}
       <line>
         <bufferGeometry>
-          <bufferAttribute
-            attach="attributes-position"
-            args={[new Float32Array([0, 0, 0, 1, 0, 0]), 3]}
-          />
+          <bufferAttribute attach="attributes-position" args={[AXIS_X, 3]} />
         </bufferGeometry>
         <lineBasicMaterial color="red" />
       </line>
       {/* Y axis - Green */}
       <line>
         <bufferGeometry>
-          <bufferAttribute
-            attach="attributes-position"
-            args={[new Float32Array([0, 0, 0, 0, 1, 0]), 3]}
-          />
+          <bufferAttribute attach="attributes-position" args={[AXIS_Y, 3]} />
         </bufferGeometry>
         <lineBasicMaterial color="green" />
       </line>
       {/* Z axis - Blue */}
       <line>
         <bufferGeometry>
-          <bufferAttribute
-            attach="attributes-position"
-            args={[new Float32Array([0, 0, 0, 0, 0, 1]), 3]}
-          />
+          <bufferAttribute attach="attributes-position" args={[AXIS_Z, 3]} />
         </bufferGeometry>
         <lineBasicMaterial color="blue" />
       </line>
+      <gridHelper args={[10, 10, '#444', '#333']} />
     </group>
   )
-}
+})
 
 function exportToPLY(vertices: Float32Array) {
   const numPoints = vertices.length / 3

@@ -1713,6 +1713,10 @@ class RealSenseManager:
                 continue
         return attrs
 
+    # Cap the number of vertices shipped per frame so payload/decode/render cost
+    # stays roughly constant regardless of stream resolution.
+    POINT_CLOUD_MAX_VERTICES = 60000
+
     def _build_point_cloud_metadata(self, depth_frame) -> Optional[Dict]:
         """Compute decimated point-cloud vertices from a depth frame, ready for serialization.
 
@@ -1724,7 +1728,14 @@ class RealSenseManager:
             return None
         verts = np.asanyarray(points.get_vertices()).view(np.float32).reshape(-1, 3)
         verts = verts[verts[:, 2] >= 0.03]  # drop invalid near-camera points
-        verts = verts[::4]  # decimate to keep payload under Socket.IO buffer cap
+        # Resolution-adaptive decimation: stride to a fixed vertex budget so a
+        # 1280x720 cloud isn't an order of magnitude heavier than 640x480.
+        count = len(verts)
+        if count > self.POINT_CLOUD_MAX_VERTICES:
+            step = (count // self.POINT_CLOUD_MAX_VERTICES) + 1
+            verts = verts[::step]
+        # Contiguous float32 so .tobytes() in the socket server is a straight memcpy.
+        verts = np.ascontiguousarray(verts, dtype=np.float32)
         return {"vertices": verts, "texture_coordinates": []}
 
     def _collect_frames(self, device_id: str, align_processor=None):

@@ -1098,16 +1098,22 @@ export const useAppStore = create<AppState>()((set, get) => ({
         }
       }
 
-      // Extract point cloud data if present
+      // Extract point cloud data if present.
+      // Server sends raw float32 bytes as a Socket.IO binary attachment (ArrayBuffer);
+      // fall back to base64 string for older servers.
       if (streamData.point_cloud?.vertices) {
         try {
-          const base64Data = streamData.point_cloud.vertices
-          const binaryString = atob(base64Data)
-          const bytes = new Uint8Array(binaryString.length)
-          for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.charCodeAt(i)
+          const raw = streamData.point_cloud.vertices
+          let vertices: Float32Array
+          if (typeof raw === 'string') {
+            const bytes = Uint8Array.from(atob(raw), (c) => c.charCodeAt(0))
+            vertices = new Float32Array(bytes.buffer)
+          } else if (raw instanceof ArrayBuffer) {
+            vertices = new Float32Array(raw)
+          } else {
+            const u8 = new Uint8Array(raw as ArrayBufferLike)
+            vertices = new Float32Array(u8.buffer, u8.byteOffset, u8.byteLength >> 2)
           }
-          const vertices = new Float32Array(bytes.buffer)
           set({ pointCloudVertices: vertices })
         } catch (error) {
           console.error('Failed to decode point cloud data:', error)

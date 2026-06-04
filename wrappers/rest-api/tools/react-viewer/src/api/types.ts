@@ -125,7 +125,8 @@ export interface IMUData {
 }
 
 export interface PointCloudData {
-  vertices: string // Base64-encoded Float32Array
+  // Raw float32 bytes (Socket.IO binary attachment) or base64-encoded string (legacy server).
+  vertices: ArrayBuffer | string
   texture_coordinates: number[]
 }
 
