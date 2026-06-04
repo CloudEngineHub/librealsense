@@ -53,6 +53,8 @@ namespace librealsense
     protected:
         nanoseconds get_file_duration();
 
+        std::shared_ptr<rosbag2_storage_plugins::SqliteStorage> as_sqlite_storage();
+
         virtual device_snapshot read_device_description(const nanoseconds& time, bool reset = false) = 0;
 
         // Each subclass MUST implement all three topic getters (empty list if a
@@ -79,11 +81,11 @@ namespace librealsense
         virtual void setup_frame(frame_interface* frame_ptr, const stream_identifier& sid) const = 0;
 
         // True if `topic` carries frame data (not metadata/option/notification); fills `sid`.
-        virtual bool is_frame_topic(const std::string& topic, stream_identifier& sid) const = 0;
+        virtual bool is_stream_topic(const std::string& topic, stream_identifier& sid) const = 0;
         virtual std::shared_ptr<serialized_frame> create_frame(
             const std::shared_ptr<rosbag2_storage::SerializedBagMessage>& msg) = 0;
 
-        std::shared_ptr<rosbag2_storage_plugins::SqliteStorage> _storage;
+        std::shared_ptr<rosbag2_storage::storage_interfaces::ReadWriteInterface> _storage;
         std::shared_ptr<metadata_parser_map>          m_metadata_parser_map;
         device_snapshot                               m_initial_device_description;
         nanoseconds                                   m_total_duration;

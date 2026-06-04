@@ -35,7 +35,6 @@ def test_playback_step():
     queue = rs.frame_queue( 10 )
     depth_sensor.open( depth_profile )
     depth_sensor.start( queue )
-    time.sleep( 0.2 )  # let the sensor dispatcher spin up before the first step
 
     def step( delta_ns ):
         target = dev.get_position() + delta_ns
@@ -50,21 +49,24 @@ def test_playback_step():
             ts = frame.get_timestamp()
         return ts
 
-    # forward, like the viewer's "next frame" button
-    prev_ts = None
-    for _ in range( NUM_STEPS ):
-        ts = step( step_ns )
-        if None not in (ts, prev_ts):
-            check.greater( ts, prev_ts, "timestamp did not advance on forward step" )
-        prev_ts = ts
+    try:
+        time.sleep( 0.2 )  # let the sensor dispatcher spin up before the first step
 
-    # backward, like the viewer's "previous frame" button; one less than forward so we
-    # never step past the stream's first frame
-    for _ in range( NUM_STEPS - 1 ):
-        ts = step( -step_ns )
-        if None not in (ts, prev_ts):
-            check.less( ts, prev_ts, "timestamp did not recede on backward step" )
-        prev_ts = ts
+        # forward, like the viewer's "next frame" button
+        prev_ts = None
+        for _ in range( NUM_STEPS ):
+            ts = step( step_ns )
+            if None not in (ts, prev_ts):
+                check.greater( ts, prev_ts, "timestamp did not advance on forward step" )
+            prev_ts = ts
 
-    depth_sensor.stop()
-    depth_sensor.close()
+        # backward, like the viewer's "previous frame" button; one less than forward so we
+        # never step past the stream's first frame
+        for _ in range( NUM_STEPS - 1 ):
+            ts = step( -step_ns )
+            if None not in (ts, prev_ts):
+                check.less( ts, prev_ts, "timestamp did not recede on backward step" )
+            prev_ts = ts
+    finally:
+        depth_sensor.stop()
+        depth_sensor.close()

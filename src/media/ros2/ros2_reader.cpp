@@ -158,11 +158,6 @@ namespace librealsense
         return std::make_shared<serialized_end_of_file>();
     }
 
-    bool ros2_reader::is_frame_topic(const std::string& topic, stream_identifier& sid) const
-    {
-        return is_stream_topic(topic, sid);
-    }
-
     std::shared_ptr< serialized_frame > ros2_reader::create_frame(const std::shared_ptr<rosbag2_storage::SerializedBagMessage>& msg)
     {
         nanoseconds timestamp(msg->time_stamp);
@@ -852,7 +847,7 @@ namespace librealsense
 
     // Helpers ---------------------------------------------------------------------
 
-    bool ros2_reader::is_stream_topic(const std::string& topic, stream_identifier& id)
+    bool ros2_reader::is_stream_topic(const std::string& topic, stream_identifier& id) const
     {
         // Format: /device_N/sensor_N/StreamType_Idx/<ros_type>/data
         if (topic.find("/device_") != 0)

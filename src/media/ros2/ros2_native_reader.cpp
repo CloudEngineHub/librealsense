@@ -409,7 +409,7 @@ namespace librealsense
         return device_snapshot(device_extensions, sensor_descriptions, {});
     }
 
-    bool ros2_native_reader::is_frame_topic(const std::string& topic, stream_identifier& sid) const
+    bool ros2_native_reader::is_stream_topic(const std::string& topic, stream_identifier& sid) const
     {
         auto it = _topic_to_stream_id.find(topic);
         if (it == _topic_to_stream_id.end())

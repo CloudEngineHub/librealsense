@@ -24,7 +24,8 @@ void init_record_playback(py::module &m) {
         .def("set_real_time", &rs2::playback::set_real_time, "Set the playback to work in real time or non real time. In real time mode, playback will "
              "play the same way the file was recorded. If the application takes too long to handle the callback, frames may be dropped. In non real time "
              "mode, playback will wait for each callback to finish handling the data before reading the next frame. In this mode no frames will be dropped, "
-             "and the application controls the framerate of playback via callback duration.", "real_time"_a)
+             "and the application controls the framerate of playback via callback duration.", "real_time"_a,
+             py::call_guard<py::gil_scoped_release>())
         // set_playback_speed?
         .def("set_status_changed_callback", [](rs2::playback& self, std::function<void(rs2_playback_status)> callback) {
             self.set_status_changed_callback(std::move(callback));

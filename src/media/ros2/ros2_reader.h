@@ -51,7 +51,7 @@ namespace librealsense
         std::vector<std::string> get_notification_topics() const override;
 
         // Topic parsing helpers
-        static bool is_stream_topic(const std::string& topic, stream_identifier& id);
+        bool is_stream_topic(const std::string& topic, stream_identifier& sid) const override;
         std::string read_option_description(const uint32_t sensor_index, const rs2_option& id);
         std::shared_ptr<info_container> read_info_snapshot(const std::string& topic);
         std::shared_ptr<stream_profile_interface> read_next_stream_profile();
@@ -68,7 +68,6 @@ namespace librealsense
         // Frame setup helpers
         void read_frame_metadata(frame_additional_data& additional_data);
         void setup_frame(frame_interface* frame_ptr, const stream_identifier& sid) const override;
-        bool is_frame_topic(const std::string& topic, stream_identifier& sid) const override;
 
         std::pair<rs2_option, std::shared_ptr<librealsense::option>> create_option(const std::shared_ptr<rosbag2_storage::SerializedBagMessage> msg);
         std::shared_ptr< serialized_frame > create_frame(const std::shared_ptr<rosbag2_storage::SerializedBagMessage>& msg) override;
