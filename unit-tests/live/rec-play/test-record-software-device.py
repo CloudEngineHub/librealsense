@@ -2,6 +2,7 @@
 # Copyright(c) 2023 RealSense, Inc. All Rights Reserved.
 
 import os.path
+import shutil
 import tempfile
 import numpy as np
 import pyrealsense2 as rs
@@ -164,8 +165,11 @@ stream_profiles = [depth_stream_profile, motion_stream_profile]
 video_frame = prepare_depth_frame(pixels, BPP, depth_stream_profile)
 motion_frame = prepare_motion_frame(motion_frame_data, motion_stream_profile)
 
-record_frames(filename, sd, sync, video_frame, motion_frame, sensor, stream_profiles)
-play_frames(filename)
+try:
+    record_frames(filename, sd, sync, video_frame, motion_frame, sensor, stream_profiles)
+    play_frames(filename)
+finally:
+    shutil.rmtree(temp_dir, ignore_errors=True)
 
 test.finish()
 ################################################################################################
