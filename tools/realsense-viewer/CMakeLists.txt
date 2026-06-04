@@ -196,38 +196,38 @@ endif()
 
 set(RS_VIEWER_LIBS ${GTK3_LIBRARIES} Threads::Threads realsense2-gl)
 
-if(BUILD_WITH_MINZ)
+if(BUILD_WITH_CLOSE_RANGE_DEPTH)
     # librs_depth_range.so is loaded at runtime via dlopen (see rs-depth-range-loader.h);
-    # the binary starts normally when the library is absent — the MinZ toggle is greyed out.
+    # the binary starts normally when the library is absent — the Improved Close Range Depth toggle is greyed out.
     # Install the library with: sudo dpkg -i librealsense2-enhanced-depth-*.deb
-    set(MINZ_ROOT "/opt/librealsense2-enhanced-depth" CACHE PATH
+    set(CLOSE_RANGE_DEPTH_ROOT "/opt/librealsense2-enhanced-depth" CACHE PATH
         "Root of the librealsense2-enhanced-depth installation (default: /opt/librealsense2-enhanced-depth)")
 
-    find_path(MINZ_INCLUDE_DIR
+    find_path(CLOSE_RANGE_DEPTH_INCLUDE_DIR
         NAMES rs_depth_range.hpp
-        PATHS "${MINZ_ROOT}/include"
+        PATHS "${CLOSE_RANGE_DEPTH_ROOT}/include"
         NO_DEFAULT_PATH
     )
     # rs_depth_calibration.hpp is also required; both ship in the same package directory
-    find_file(MINZ_CALIBRATION_HEADER
+    find_file(CLOSE_RANGE_DEPTH_CALIBRATION_HEADER
         NAMES rs_depth_calibration.hpp
-        PATHS "${MINZ_ROOT}/include"
+        PATHS "${CLOSE_RANGE_DEPTH_ROOT}/include"
         NO_DEFAULT_PATH
     )
 
-    if(NOT MINZ_INCLUDE_DIR)
-        message(FATAL_ERROR "rs_depth_range.hpp not found under ${MINZ_ROOT}/include -- "
-            "install librealsense2-enhanced-depth or set MINZ_ROOT")
+    if(NOT CLOSE_RANGE_DEPTH_INCLUDE_DIR)
+        message(FATAL_ERROR "rs_depth_range.hpp not found under ${CLOSE_RANGE_DEPTH_ROOT}/include -- "
+            "install librealsense2-enhanced-depth or set CLOSE_RANGE_DEPTH_ROOT")
     endif()
-    if(NOT MINZ_CALIBRATION_HEADER)
-        message(FATAL_ERROR "rs_depth_calibration.hpp not found under ${MINZ_ROOT}/include -- "
-            "install librealsense2-enhanced-depth or set MINZ_ROOT")
+    if(NOT CLOSE_RANGE_DEPTH_CALIBRATION_HEADER)
+        message(FATAL_ERROR "rs_depth_calibration.hpp not found under ${CLOSE_RANGE_DEPTH_ROOT}/include -- "
+            "install librealsense2-enhanced-depth or set CLOSE_RANGE_DEPTH_ROOT")
     endif()
 
-    target_compile_definitions(${PROJECT_NAME} PRIVATE BUILD_WITH_MINZ)
-    target_include_directories(${PROJECT_NAME} PRIVATE "${MINZ_INCLUDE_DIR}")
-    message(STATUS "MinZ depth improvement enabled (runtime dlopen)")
-    message(STATUS "  include : ${MINZ_INCLUDE_DIR}")
+    target_compile_definitions(${PROJECT_NAME} PRIVATE BUILD_WITH_CLOSE_RANGE_DEPTH)
+    target_include_directories(${PROJECT_NAME} PRIVATE "${CLOSE_RANGE_DEPTH_INCLUDE_DIR}")
+    message(STATUS "Improved Close Range Depth enabled (runtime dlopen)")
+    message(STATUS "  include : ${CLOSE_RANGE_DEPTH_INCLUDE_DIR}")
 endif()
 
 include(../tools_common.cmake)
