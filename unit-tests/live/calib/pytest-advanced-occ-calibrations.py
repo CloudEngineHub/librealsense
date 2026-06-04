@@ -66,13 +66,12 @@ def run_advanced_occ_calibration_test(host_assistance, config, pipeline, calib_d
 
         Flow:
         1. Read and log base principal points (reference).
-        2. Measure baseline average depth; establish ground truth if not provided.
-        3. Apply manual principal-point perturbation (ppx/ppy shift) to the calibration table.
-        4. Re-read and verify the modification was applied (delta vs base within tolerance).
-        5. Measure average depth after modification (pre-OCC).
-        6. Run OCC calibration (host assistance optional); obtain new table & health factor; validate threshold.
-        7. Write returned table; read final principal points; compute and log distances to base and modified.
-        8. Measure post-OCC average depth; assert convergence toward ground truth and principal point reversion (failure handling if not satisfied).
+        2. Apply manual principal-point perturbation (ppx/ppy shift) to the calibration table.
+        3. Re-read and verify the modification was applied (delta vs base within tolerance).
+        4. Measure fill rate after modification (pre-OCC).
+        5. Run OCC calibration (host assistance optional); obtain new table & health factor; validate threshold.
+        6. Write returned table; read final principal points; compute and log distances to base and modified.
+        7. Measure post-OCC fill rate; assert it is higher than the modified fill rate and principal point reversion (failure handling if not satisfied).
     """
     try:
 
@@ -92,14 +91,7 @@ def run_advanced_occ_calibration_test(host_assistance, config, pipeline, calib_d
 
         base_axis_val = base_right_pp[1]
 
-        # 2. Baseline fill rate (before perturbation)
-        baseline_fill_rate = measure_depth_fill_rate(config, pipeline, width=image_width, height=image_height, fps=fps)
-        if baseline_fill_rate is not None:
-            log.info(f"Baseline fill rate (pre-modification): {baseline_fill_rate*100:.1f}%")
-        else:
-            log.warning("Baseline fill rate unavailable; fill rate convergence assertion will be skipped")
-        
-        # 3. Apply perturbation
+        # 2. Apply perturbation
         pixel_correction = PIXEL_CORRECTION
         log.info(f"Applying manual raw intrinsic correction: delta={pixel_correction:+.3f} px")
         modification_success, _modified_table_bytes, modified_ppx, modified_ppy = modify_intrinsic_calibration(
@@ -175,9 +167,9 @@ def run_advanced_occ_calibration_test(host_assistance, config, pipeline, calib_d
             log.error("Fill rate after OCC unavailable")
             pytest.fail()
 
-        # Fill rate assertion: post-OCC fill rate must be at least as good as the perturbed fill rate
-        if (baseline_fill_rate is not None and modified_fill_rate is not None and post_fill_rate is not None):
-            log.info(f"Fill rates: baseline={baseline_fill_rate*100:.1f}% modified={modified_fill_rate*100:.1f}% post={post_fill_rate*100:.1f}%")
+        # Fill rate assertion: post-OCC fill rate must be higher than the perturbed fill rate
+        if modified_fill_rate is not None and post_fill_rate is not None:
+            log.info(f"Fill rates: modified={modified_fill_rate*100:.1f}% post={post_fill_rate*100:.1f}%")
             if post_fill_rate - FILL_RATE_CONVERGENCE_TOLERANCE <= modified_fill_rate:
                 log.error("Post-OCC fill rate did not improve over perturbed fill rate")
                 pytest.fail()
