@@ -122,8 +122,8 @@ class RealSenseManager:
                 self._remove_device(serial)
             self._supported_md_by_profile.clear()
 
-        if removed and self.metadata_socket_server._target_device_id in removed:
-            self.metadata_socket_server.stop_broadcast()
+        for serial in removed:
+            self.metadata_socket_server.stop_broadcast(serial)
 
         if added or removed:
             logging.info("devices_changed: +%s -%s", added, removed)
@@ -990,11 +990,7 @@ class RealSenseManager:
             # Update device info
             if device_id in self.device_infos:
                 self.device_infos[device_id].is_streaming = True
-            threading.Thread(
-                target=self.metadata_socket_server.start_broadcast,
-                args=(device_id,),
-                daemon=True,
-            ).start()
+            self.metadata_socket_server.start_broadcast(device_id)
             timings['thread_start'] = time.perf_counter() - t6
             timings['total'] = time.perf_counter() - t0
             logging.debug("[TIMING] start_stream timings for %s: %s", device_id, timings)
@@ -1035,7 +1031,7 @@ class RealSenseManager:
 
         def _do_stop():
             try:
-                self.metadata_socket_server.stop_broadcast()
+                self.metadata_socket_server.stop_broadcast(device_id)
                 self.pipelines[device_id].stop()
             except Exception as e:
                 logging.error("Failed to stop streaming for %s: %s", device_id, e)
@@ -1935,13 +1931,8 @@ class RealSenseManager:
                 daemon=True
             ).start()
             
-            # Start metadata broadcast if not already running
-            if not self.metadata_socket_server._is_broadcasting:
-                threading.Thread(
-                    target=self.metadata_socket_server.start_broadcast,
-                    args=(device_id,),
-                    daemon=True,
-                ).start()
+            # Start per-device metadata broadcast (no-op if already running for this device).
+            self.metadata_socket_server.start_broadcast(device_id)
             
             logging.info(f"[SENSOR] Started {sensor_id} with streams: {stream_types}")
             
@@ -2029,28 +2020,35 @@ class RealSenseManager:
             logging.warning(f"[SENSOR] Error stopping {sensor_id}: {e}")
         
         # Clean up state
+        last_sensor_stopped = False
         with self.lock:
             if device_id in self.sensor_streams:
                 self.sensor_streams[device_id].pop(sensor_id, None)
                 if not self.sensor_streams[device_id]:
                     del self.sensor_streams[device_id]
                     self.streaming_mode[device_id] = "idle"
-            
+                    last_sensor_stopped = True
+
             if device_id in self.sensor_frame_queues:
                 self.sensor_frame_queues[device_id].pop(sensor_id, None)
                 if not self.sensor_frame_queues[device_id]:
                     del self.sensor_frame_queues[device_id]
-            
+
             if device_id in self.sensor_metadata_queues:
                 self.sensor_metadata_queues[device_id].pop(sensor_id, None)
                 if not self.sensor_metadata_queues[device_id]:
                     del self.sensor_metadata_queues[device_id]
-            
+
             if device_id in self.sensor_rs_queues:
                 self.sensor_rs_queues[device_id].pop(sensor_id, None)
                 if not self.sensor_rs_queues[device_id]:
                     del self.sensor_rs_queues[device_id]
-        
+
+        # Stop the per-device metadata broadcaster once the last sensor on this
+        # device has stopped.
+        if last_sensor_stopped:
+            self.metadata_socket_server.stop_broadcast(device_id)
+
         logging.info(f"[SENSOR] Stopped {sensor_id}")
         
         return SensorStreamStatus(
