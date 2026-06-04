@@ -27,6 +27,9 @@ namespace librealsense
     {
         uvc_pu_option::set( value );
 
+        // When AE is turned off, the device may keep streaming with the last
+        // auto-computed exposure. Re-write the default exposure to force the
+        // device to apply a known manual value.
         if( value != 0 )
             return;
 
