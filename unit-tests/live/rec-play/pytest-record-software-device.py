@@ -1,12 +1,9 @@
 # License: Apache 2.0. See LICENSE file in root directory.
-# Copyright(c) 2023 RealSense, Inc. All Rights Reserved.
+# Copyright(c) 2026 RealSense, Inc. All Rights Reserved.
 
-import os.path
-import shutil
-import tempfile
 import numpy as np
 import pyrealsense2 as rs
-from rspy import test
+from pytest_check import check
 
 
 def prepare_video_stream(width, height, bpp):
@@ -88,20 +85,20 @@ def record_frames(filename, sd, sync, video_frame, motion_frame, sensor, stream_
 def compare_frames(recorded_depth,recorded_accel):
     recorded_depth_data = np.hstack(np.asarray(recorded_depth.as_depth_frame().get_data())).view(dtype=np.uint8)
     for (i, pixel) in enumerate(pixels):
-        test.check_equal(pixel, recorded_depth_data[i])
+        check.equal(pixel, recorded_depth_data[i])
 
-    test.check_equal(video_frame.frame_number, recorded_depth.get_frame_number())
-    test.check_equal(video_frame.domain, recorded_depth.get_frame_timestamp_domain())
-    test.check_equal(video_frame.timestamp, recorded_depth.get_timestamp())
+    check.equal(video_frame.frame_number, recorded_depth.get_frame_number())
+    check.equal(video_frame.domain, recorded_depth.get_frame_timestamp_domain())
+    check.equal(video_frame.timestamp, recorded_depth.get_timestamp())
 
 
     recorded_accel_data = recorded_accel.as_motion_frame().get_motion_data()
-    test.check_equal(motion_frame_data.x, recorded_accel_data.x)
-    test.check_equal(motion_frame_data.y, recorded_accel_data.y)
-    test.check_equal(motion_frame_data.z, recorded_accel_data.z)
-    test.check_equal(motion_frame.frame_number, recorded_accel.get_frame_number())
-    test.check_equal(motion_frame.domain, recorded_accel.get_frame_timestamp_domain())
-    test.check_equal(motion_frame.timestamp, recorded_accel.get_timestamp())
+    check.equal(motion_frame_data.x, recorded_accel_data.x)
+    check.equal(motion_frame_data.y, recorded_accel_data.y)
+    check.equal(motion_frame_data.z, recorded_accel_data.z)
+    check.equal(motion_frame.frame_number, recorded_accel.get_frame_number())
+    check.equal(motion_frame.domain, recorded_accel.get_frame_timestamp_domain())
+    check.equal(motion_frame.timestamp, recorded_accel.get_timestamp())
 
 
 def play_frames(filename):
@@ -132,45 +129,39 @@ def play_frames(filename):
 
 
 ################################################################################################
-test.start("Record software-device")
+def test_record_software_device(tmp_path):
+    global W, H, BPP, pixels, video_frame, motion_frame, motion_frame_data
 
-W = 640
-H = 480
-BPP = 2
+    W = 640
+    H = 480
+    BPP = 2
 
-temp_dir = tempfile.mkdtemp()
-filename = os.path.join(temp_dir, "recording.db3")
+    filename = str(tmp_path / "recording.db3")
 
-video_frame = rs.software_video_frame()
-motion_frame = rs.software_motion_frame()
+    video_frame = rs.software_video_frame()
+    motion_frame = rs.software_motion_frame()
 
-pixels = np.array([100 for i in range(W*H*BPP)], dtype=np.uint8)
-motion_frame_data = rs.vector()
-motion_frame_data.x = 1.0
-motion_frame_data.y = 2.0
-motion_frame_data.z = 3.0
+    pixels = np.array([100 for i in range(W*H*BPP)], dtype=np.uint8)
+    motion_frame_data = rs.vector()
+    motion_frame_data.x = 1.0
+    motion_frame_data.y = 2.0
+    motion_frame_data.z = 3.0
 
-sd = rs.software_device()
-sensor = sd.add_sensor("Synthetic")
+    sd = rs.software_device()
+    sensor = sd.add_sensor("Synthetic")
 
-vs = prepare_video_stream(W, H, BPP)
-depth_stream_profile = sensor.add_video_stream(vs).as_video_stream_profile()
+    vs = prepare_video_stream(W, H, BPP)
+    depth_stream_profile = sensor.add_video_stream(vs).as_video_stream_profile()
 
-motion_stream = prepare_motion_stream()
-motion_stream_profile = sensor.add_motion_stream(motion_stream)
+    motion_stream = prepare_motion_stream()
+    motion_stream_profile = sensor.add_motion_stream(motion_stream)
 
-sync = rs.syncer()
-stream_profiles = [depth_stream_profile, motion_stream_profile]
+    sync = rs.syncer()
+    stream_profiles = [depth_stream_profile, motion_stream_profile]
 
-video_frame = prepare_depth_frame(pixels, BPP, depth_stream_profile)
-motion_frame = prepare_motion_frame(motion_frame_data, motion_stream_profile)
+    video_frame = prepare_depth_frame(pixels, BPP, depth_stream_profile)
+    motion_frame = prepare_motion_frame(motion_frame_data, motion_stream_profile)
 
-try:
     record_frames(filename, sd, sync, video_frame, motion_frame, sensor, stream_profiles)
     play_frames(filename)
-finally:
-    shutil.rmtree(temp_dir, ignore_errors=True)
-
-test.finish()
 ################################################################################################
-test.print_results_and_exit()
