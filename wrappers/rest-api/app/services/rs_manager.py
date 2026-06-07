@@ -367,16 +367,16 @@ class RealSenseManager:
                 logging.info("Firmware download completed, waiting for device to finalize...")
                 time.sleep(3)
 
-                # After DFU the original rs.context() can stay stale — the device
-                # re-enumerates over USB but the SDK keeps reporting the empty /
-                # DFU-mode list. Drop SDK references; we'll recreate the context
-                # periodically inside the wait loop below.
+                # Drop SDK references to the pre-DFU handles; they will be
+                # invalidated by the device re-enumeration. The ctx itself is
+                # kept — replacing it would silently drop the
+                # set_devices_changed_callback registration done in __init__,
+                # and the post-DFU device-back event would never reach us.
                 update_dev = None
                 target_dev = None
                 with self.lock:
                     self.devices.clear()
                     self.device_infos.clear()
-                self._recreate_ctx("post-firmware-update")
 
                 self._wait_for_device_reconnect(device_id, firmware_update_id)
             except RealSenseError:
@@ -457,8 +457,8 @@ class RealSenseManager:
         """Reject the update if the device is unknown or if anything is streaming."""
         if device_id not in self.devices:
             raise RealSenseError(status_code=404, detail=f"Device {device_id} not found")
-        # FW update wipes self.devices/self.device_infos and recreates self.ctx,
-        # which would invalidate refs to any OTHER tracked devices. Refuse the
+        # FW update wipes self.devices/self.device_infos and the DFU
+        # transition invalidates refs to any OTHER tracked devices. Refuse the
         # update if any pipeline is active anywhere — not just on the target.
         with self.lock:
             if self.pipelines:
@@ -607,38 +607,24 @@ class RealSenseManager:
         except Exception as exc:
             logging.warning("Explicit hardware_reset() on DFU device failed (likely benign): %s", exc)
 
-    def _recreate_ctx(self, reason: str) -> None:
-        """Recreate self.ctx; the assignment is performed under self.lock."""
-        try:
-            new_ctx = rs.context()
-        except Exception as exc:
-            logging.warning("Failed to recreate rs.context (%s): %s", reason, exc)
-            return
-        # Swap under the lock so concurrent refresh_devices() callers
-        # don't observe a torn ctx assignment.
-        with self.lock:
-            self.ctx = new_ctx
-        logging.info("Recreated rs.context() (%s)", reason)
-
     def _wait_for_device_reconnect(
         self, device_id: str, firmware_update_id: str, max_wait_seconds: int = 120,
     ) -> None:
         """Wait for the device to re-enumerate in normal mode after DFU.
 
-        Periodically recreates self.ctx to kick the SDK out of any stuck state.
+        Polls ``self.ctx.query_devices()`` once a second. The SDK's
+        devices-changed callback (registered once in ``__init__``) also fires
+        when the device returns; we don't touch self.ctx here because
+        replacing it would silently drop that callback registration.
+
         Raises RealSenseError if the device sticks in DFU/recovery; logs and returns
         if it simply never reappears within the timeout (update may have succeeded).
         """
         reconnected = False
         stuck_in_dfu = False
         start_time = time.time()
-        last_ctx_refresh = time.time()
         while time.time() - start_time < max_wait_seconds:
             time.sleep(1)
-            # Every 10s, recreate the context to kick the SDK out of any stuck state.
-            if time.time() - last_ctx_refresh > 10:
-                self._recreate_ctx(f"mid-wait t+{int(time.time() - start_time)}s")
-                last_ctx_refresh = time.time()
             try:
                 devs = self.ctx.query_devices()
                 # First pass: look for the device in NORMAL mode.
