@@ -315,7 +315,7 @@ def is_jetson_platform():
         with open('/proc/device-tree/model', 'r') as f:
             model = f.read()
             return 'jetson' in model.lower()
-    except:
+    except OSError:
         return False
 
 

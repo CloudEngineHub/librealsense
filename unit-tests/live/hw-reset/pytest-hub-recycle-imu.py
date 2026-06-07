@@ -15,11 +15,13 @@
 # Uses the existing rspy.devices.enable_only(recycle=True) flow so the hub
 # singleton and per-device port resolution are reused from the test fixtures.
 
+import logging
+
 import pytest
 import pyrealsense2 as rs
 from rspy import devices
 from rspy.pytest.device_helpers import is_jetson_platform
-import logging
+
 log = logging.getLogger(__name__)
 
 
@@ -61,7 +63,8 @@ def test_hub_recycle_imu_presence( test_device, test_context_var ):
         if is_jetson_platform():
             pytest.skip( "no hub on this Jetson - enable_only(recycle=True) would fall back "
                          "to an in-band hw_reset, defeating the purpose of this test" )
-        pytest.fail( f"no hub detected - hub-recycle test requires a real port power-cycle" )
+        else:
+            pytest.fail( "no hub detected - hub-recycle test requires a real port power-cycle" )
     if devices.get( sn ).port is None:
         pytest.fail( f"Hub is present but could not resolve a port for serial {sn} - "
                      "refusing to recycle all ports to avoid disturbing other devices on the hub." )
