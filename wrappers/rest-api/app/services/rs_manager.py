@@ -457,14 +457,14 @@ class RealSenseManager:
         """Reject the update if the device is unknown or if anything is streaming."""
         if device_id not in self.devices:
             raise RealSenseError(status_code=404, detail=f"Device {device_id} not found")
-        # FW update wipes self.devices/self.device_infos and the DFU
-        # transition invalidates refs to any OTHER tracked devices. Refuse the
-        # update if any pipeline is active anywhere — not just on the target.
+        # Only refuse if THIS device is streaming. Since we no longer recreate
+        # self.ctx during the update, other devices' handles stay valid and
+        # their pipelines are unaffected by the DFU transition of this device.
         with self.lock:
-            if self.pipelines:
+            if device_id in self.pipelines:
                 raise RealSenseError(
                     status_code=400,
-                    detail="Stop all streaming before updating firmware",
+                    detail="Stop streaming on this device before updating firmware",
                 )
 
     @staticmethod

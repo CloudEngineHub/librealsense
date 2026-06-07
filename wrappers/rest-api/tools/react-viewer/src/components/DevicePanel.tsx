@@ -55,7 +55,6 @@ export function DevicePanel() {
     stopSensorStreaming,
     checkFirmwareUpdates,
     updateFirmwareFromFile,
-    isAnyDeviceStreaming,
   } = useAppStore()
 
   const [toasts, setToasts] = useState<Toast[]>([])
@@ -63,8 +62,6 @@ export function DevicePanel() {
   const [firmwareProgressDeviceId, setFirmwareProgressDeviceId] = useState<string | null>(null)
   const [firmwareProgressState, setFirmwareProgressState] = useState<FirmwareState | null>(null)
   const [firmwareFileName, setFirmwareFileName] = useState<string | null>(null)
-
-  const isStreaming = isAnyDeviceStreaming()
 
   useEffect(() => {
     fetchDevices()
@@ -223,7 +220,6 @@ export function DevicePanel() {
                 onStopSensorStreaming={(sensorId) => stopSensorStreaming(device.device_id, sensorId)}
                 onCheckFirmwareUpdates={() => checkFirmwareUpdates(device.device_id)}
                 onUpdateFirmwareFromFile={(file) => handleUpdateFirmwareFromFile(device, file)}
-                anyDeviceStreaming={isStreaming}
                 onShowToast={addToast}
               />
             )
@@ -279,7 +275,6 @@ interface DeviceCardProps {
   onStopSensorStreaming: (sensorId: string) => void
   onCheckFirmwareUpdates: () => void
   onUpdateFirmwareFromFile: (file: File) => void
-  anyDeviceStreaming: boolean
   onShowToast: (type: ToastType, message: string) => void
 }
 
@@ -295,7 +290,6 @@ function DeviceCard({
   onStopSensorStreaming,
   onCheckFirmwareUpdates,
   onUpdateFirmwareFromFile,
-  anyDeviceStreaming,
   onShowToast,
 }: DeviceCardProps) {
   const [showMenu, setShowMenu] = useState(false)
@@ -417,9 +411,9 @@ function DeviceCard({
                         // file input lives outside the menu and persists.
                         setTimeout(() => fwPicker.open(), 0)
                       }}
-                      disabled={anyDeviceStreaming || isStreaming}
+                      disabled={isStreaming}
                       className={`w-full px-4 py-2 text-left text-sm flex items-center gap-2 ${
-                        anyDeviceStreaming || isStreaming
+                        isStreaming
                           ? 'text-gray-500 cursor-not-allowed'
                           : 'hover:bg-gray-700'
                       }`}
