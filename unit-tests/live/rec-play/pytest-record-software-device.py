@@ -8,12 +8,12 @@ from pytest_check import check
 
 def prepare_video_stream(width, height, bpp):
     depth_intrinsics = rs.intrinsics()
-    depth_intrinsics.width = W
-    depth_intrinsics.height = H
-    depth_intrinsics.ppx = W / 2
-    depth_intrinsics.ppy = H / 2
-    depth_intrinsics.fx = W
-    depth_intrinsics.fy = H
+    depth_intrinsics.width = width
+    depth_intrinsics.height = height
+    depth_intrinsics.ppx = width / 2
+    depth_intrinsics.ppy = height / 2
+    depth_intrinsics.fx = width
+    depth_intrinsics.fy = height
     depth_intrinsics.model = rs.distortion.brown_conrady
     depth_intrinsics.coeffs = [0, 0, 0, 0, 0]
 
@@ -21,10 +21,10 @@ def prepare_video_stream(width, height, bpp):
     vs.type = rs.stream.depth
     vs.index = 0
     vs.uid = 0
-    vs.width = W
-    vs.height = H
+    vs.width = width
+    vs.height = height
     vs.fps = 60
-    vs.bpp = BPP
+    vs.bpp = bpp
     vs.fmt = rs.format.z16
     vs.intrinsics = depth_intrinsics
     return vs
@@ -47,10 +47,10 @@ def prepare_motion_stream():
     return motion_stream
 
 
-def prepare_depth_frame(pixels, bpp, depth_stream_profile):
+def prepare_depth_frame(video_frame, pixels, width, bpp, depth_stream_profile):
     video_frame.pixels = pixels
-    video_frame.bpp = BPP
-    video_frame.stride = W*BPP
+    video_frame.bpp = bpp
+    video_frame.stride = width*bpp
     video_frame.timestamp = 10000
     video_frame.domain = rs.timestamp_domain.hardware_clock
     video_frame.frame_number = 0
@@ -58,7 +58,7 @@ def prepare_depth_frame(pixels, bpp, depth_stream_profile):
     return video_frame
 
 
-def prepare_motion_frame(motion_frame_data, motion_stream_profile):
+def prepare_motion_frame(motion_frame, motion_frame_data, motion_stream_profile):
     motion_frame.data = motion_frame_data
     motion_frame.timestamp = 20000
     motion_frame.domain = rs.timestamp_domain.hardware_clock
@@ -82,7 +82,7 @@ def record_frames(filename, sd, sync, video_frame, motion_frame, sensor, stream_
     recorder = None
 
 
-def compare_frames(recorded_depth,recorded_accel):
+def compare_frames(recorded_depth, recorded_accel, pixels, video_frame, motion_frame, motion_frame_data):
     recorded_depth_data = np.hstack(np.asarray(recorded_depth.as_depth_frame().get_data())).view(dtype=np.uint8)
     for (i, pixel) in enumerate(pixels):
         check.equal(pixel, recorded_depth_data[i])
@@ -101,7 +101,7 @@ def compare_frames(recorded_depth,recorded_accel):
     check.equal(motion_frame.timestamp, recorded_accel.get_timestamp())
 
 
-def play_frames(filename):
+def play_frames(filename, pixels, video_frame, motion_frame, motion_frame_data):
     ctx = rs.context()
     player_dev = ctx.load_device(filename)
     player_dev.set_real_time(False)
@@ -122,7 +122,7 @@ def play_frames(filename):
             recorded_accel = fset.first_or_default(rs.stream.accel)
         success, fset = player_sync.try_wait_for_frames()
 
-    compare_frames(recorded_depth,recorded_accel)
+    compare_frames(recorded_depth, recorded_accel, pixels, video_frame, motion_frame, motion_frame_data)
 
     s.stop()
     s.close()
@@ -130,8 +130,6 @@ def play_frames(filename):
 
 ################################################################################################
 def test_record_software_device(tmp_path):
-    global W, H, BPP, pixels, video_frame, motion_frame, motion_frame_data
-
     W = 640
     H = 480
     BPP = 2
@@ -159,9 +157,9 @@ def test_record_software_device(tmp_path):
     sync = rs.syncer()
     stream_profiles = [depth_stream_profile, motion_stream_profile]
 
-    video_frame = prepare_depth_frame(pixels, BPP, depth_stream_profile)
-    motion_frame = prepare_motion_frame(motion_frame_data, motion_stream_profile)
+    video_frame = prepare_depth_frame(video_frame, pixels, W, BPP, depth_stream_profile)
+    motion_frame = prepare_motion_frame(motion_frame, motion_frame_data, motion_stream_profile)
 
     record_frames(filename, sd, sync, video_frame, motion_frame, sensor, stream_profiles)
-    play_frames(filename)
+    play_frames(filename, pixels, video_frame, motion_frame, motion_frame_data)
 ################################################################################################
