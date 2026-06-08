@@ -6,9 +6,9 @@ Tests for the pre-iteration guards in unit-tests/live/hw-reset/pytest-hub-recycl
 
 The live test refuses to run unless it can do a real port power-cycle through a hub.
 Three branches need coverage:
-- no hub + Jetson  -> pytest.skip ("no hub on this Jetson")
-- no hub + non-Jetson -> pytest.fail ("no hub detected")
-- hub present, port unresolved -> pytest.fail ("could not resolve a port")
+- no hub at all (brainstem missing / no Acroname / no UniFi)  -> pytest.skip
+- hub present, port unresolved (device not downstream of hub) -> pytest.fail
+- no Motion Module on the device                              -> pytest.skip
 
 The test file uses kebab-case, so we load it via importlib and invoke the function
 directly with mocked devices/context.
@@ -17,7 +17,7 @@ directly with mocked devices/context.
 import importlib.util
 import types
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -63,23 +63,13 @@ class TestHubRecycleImuGuards:
         monkeypatch.setattr(mod, 'devices', fake_devices)
         return fake_devices
 
-    def test_hub_none_jetson_skips(self, mod, fake_devices_module):
-        """No hub + Jetson should skip cleanly (not fail)."""
+    def test_hub_none_skips(self, mod, fake_devices_module):
+        """No hub anywhere -> skip cleanly (true on Jetson, Windows dev, clean Linux, etc.)."""
         fake_devices_module.hub = None
-        with patch.object(mod, 'is_jetson_platform', return_value=True):
-            with pytest.raises(pytest.skip.Exception, match="no hub on this Jetson"):
-                mod.test_hub_recycle_imu_presence(
-                    (_fake_dev_with_motion(), MagicMock()), 'nightly'
-                )
-
-    def test_hub_none_non_jetson_fails(self, mod, fake_devices_module):
-        """No hub on a non-Jetson rig is a misconfiguration, not an expected state."""
-        fake_devices_module.hub = None
-        with patch.object(mod, 'is_jetson_platform', return_value=False):
-            with pytest.raises(pytest.fail.Exception, match="no hub detected"):
-                mod.test_hub_recycle_imu_presence(
-                    (_fake_dev_with_motion(), MagicMock()), 'nightly'
-                )
+        with pytest.raises(pytest.skip.Exception, match="no hub configured"):
+            mod.test_hub_recycle_imu_presence(
+                (_fake_dev_with_motion(), MagicMock()), 'nightly'
+            )
 
     def test_hub_present_port_unresolved_fails(self, mod, fake_devices_module):
         """Hub detected but device not downstream of it -> port stays None -> fail."""
@@ -98,6 +88,5 @@ class TestHubRecycleImuGuards:
         dev = MagicMock()
         dev.query_sensors.return_value = [sensor]
         dev.get_info.return_value = "Intel RealSense D435"
-        with patch.object(mod, 'is_jetson_platform', return_value=False):
-            with pytest.raises(pytest.skip.Exception, match="no Motion Module"):
-                mod.test_hub_recycle_imu_presence((dev, MagicMock()), 'nightly')
+        with pytest.raises(pytest.skip.Exception, match="no Motion Module"):
+            mod.test_hub_recycle_imu_presence((dev, MagicMock()), 'nightly')
