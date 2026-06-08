@@ -192,8 +192,9 @@ namespace librealsense
         }
         else
         {
-            // MIPI RGB controls exposed once the FW/kernel driver support them (RSDEV-5918),
-            // bringing the MIPI color sensor to parity with the USB D45x/D41x RGB controls.
+            // RGB controls registered for USB but not yet for MIPI (no FW/kernel support):
+            //   RS2_OPTION_BRIGHTNESS, RS2_OPTION_CONTRAST, RS2_OPTION_GAMMA,
+            //   RS2_OPTION_BACKLIGHT_COMPENSATION, RS2_OPTION_HUE
             auto raw_color_ep = get_raw_color_sensor();
 
             color_ep.register_pu(RS2_OPTION_SATURATION);
