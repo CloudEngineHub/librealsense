@@ -11,8 +11,6 @@
 #include "d400-info.h"
 #include <src/backend.h>
 #include <src/platform/platform-utils.h>
-#include <src/platform/uvc-option.h>
-#include <src/option.h>
 
 #include <src/ds/features/auto-exposure-roi-feature.h>
 
