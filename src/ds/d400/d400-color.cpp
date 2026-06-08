@@ -11,6 +11,8 @@
 #include "d400-info.h"
 #include <src/backend.h>
 #include <src/platform/platform-utils.h>
+#include <src/platform/uvc-option.h>
+#include <src/option.h>
 
 #include <src/ds/features/auto-exposure-roi-feature.h>
 
@@ -188,11 +190,35 @@ namespace librealsense
                     { 2.f, "60Hz" },
                     { 3.f, "Auto" }, }));
         }
+        else
+        {
+            // MIPI RGB controls exposed once the FW/kernel driver support them (RSDEV-5918),
+            // bringing the MIPI color sensor to parity with the USB D45x/D41x RGB controls.
+            auto raw_color_ep = get_raw_color_sensor();
+
+            color_ep.register_pu(RS2_OPTION_SATURATION);
+            color_ep.register_pu(RS2_OPTION_SHARPNESS);
+
+            auto white_balance_option = std::make_shared<uvc_pu_option>(raw_color_ep, RS2_OPTION_WHITE_BALANCE);
+            auto auto_white_balance_option = std::make_shared<uvc_pu_option>(raw_color_ep, RS2_OPTION_ENABLE_AUTO_WHITE_BALANCE);
+            color_ep.register_option(RS2_OPTION_ENABLE_AUTO_WHITE_BALANCE, auto_white_balance_option);
+            color_ep.register_option(RS2_OPTION_WHITE_BALANCE,
+                std::make_shared<auto_disabling_control>(
+                    white_balance_option,
+                    auto_white_balance_option));
+
+            color_ep.register_option(RS2_OPTION_POWER_LINE_FREQUENCY,
+                std::make_shared<uvc_pu_option>(raw_color_ep, RS2_OPTION_POWER_LINE_FREQUENCY,
+                    std::map<float, std::string>{ { 0.f, "Disabled"},
+                    { 1.f, "50Hz" },
+                    { 2.f, "60Hz" },
+                    { 3.f, "Auto" }, }));
+        }
 
         if (_separate_color)
         {
-            // Currently disabled for certain sensors
-            if (!_is_mipi_device)
+            // Auto exposure priority is supported on all RGB sensors except D401/GMSL
+            if (!_is_mipi_device || _pid != ds::RS401_GMSL_PID)
             {
                 color_ep.register_pu(RS2_OPTION_AUTO_EXPOSURE_PRIORITY);
             }
