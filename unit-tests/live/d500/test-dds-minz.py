@@ -75,10 +75,10 @@ if test_minz_filter:
 
         minz_options = minz_embedded_filter.get_supported_options()
         test.check_equal(len(minz_options), 4)
-        check_option_in_list(rs.option.embedded_filter_enabled, minz_options)
-        check_option_in_list(rs.option.downscale_ratio, minz_options)
-        check_option_in_list(rs.option.disparity_shift, minz_options)
-        check_option_in_list(rs.option.threshold, minz_options)
+        test.check(check_option_in_list(rs.option.embedded_filter_enabled, minz_options))
+        test.check(check_option_in_list(rs.option.downscale_ratio, minz_options))
+        test.check(check_option_in_list(rs.option.disparity_shift, minz_options))
+        test.check(check_option_in_list(rs.option.threshold, minz_options))
 
     with test.closure("MinZ embedded filter defaults"):
         test.check_equal(minz_embedded_filter.get_option(rs.option.embedded_filter_enabled), MINZ_ENABLE_DEFAULT)
@@ -89,6 +89,9 @@ if test_minz_filter:
     with test.closure("MinZ embedded filter set/get options"):
         # Disable first so we can safely permute downscale ratio without tripping the active-mutex on the device
         minz_embedded_filter.set_option(rs.option.embedded_filter_enabled, 0.0)
+        # Disparity shift first: spec says shift>0 forces ratio=1, so test shift before ratio
+        # to avoid the order-dependency between the two options.
+        set_get_filter_option_value(minz_embedded_filter, rs.option.disparity_shift, 100.0)
         # Ratio: index 2 -> choice "4" (quarter-res)
         set_get_filter_option_value(minz_embedded_filter, rs.option.downscale_ratio, 2.0)
         set_get_filter_option_value(minz_embedded_filter, rs.option.threshold, 600.0)
@@ -106,12 +109,14 @@ if test_minz_filter:
     minz_enabled = False
 
     def minz_check_callback(frame):
+        # Only stop waiting once we've actually checked a frame carrying the embedded_filters
+        # metadata - otherwise an early frame with no metadata could silently pass the test.
         global waiting_for_test, minz_enabled
         if frame.supports_frame_metadata(rs.frame_metadata_value.embedded_filters):
             md_val = frame.get_frame_metadata(rs.frame_metadata_value.embedded_filters)
             value_to_check = MINZ_METADATA_BIT if minz_enabled else 0
             test.check_equal(md_val & MINZ_METADATA_BIT, value_to_check)
-        waiting_for_test = False
+            waiting_for_test = False
 
     def stream_and_check_minz_filter():
         global waiting_for_test
