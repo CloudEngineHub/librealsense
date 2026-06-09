@@ -1368,8 +1368,25 @@ namespace rs2
             : embedded_filter(filter.get())
         {
             rs2_error* e = nullptr;
-            if (!_embedded_filter || (rs2_is_embedded_filter_extendable_to(_embedded_filter.get(), 
+            if (!_embedded_filter || (rs2_is_embedded_filter_extendable_to(_embedded_filter.get(),
                 RS2_EXTENSION_TEMPORAL_EMBEDDED_FILTER, &e) == 0 && !e))
+            {
+                _embedded_filter.reset();
+            }
+            error::handle(e);
+        }
+        operator bool() const { return _embedded_filter.get() != nullptr; }
+    };
+
+    class embedded_minz_filter : public embedded_filter
+    {
+    public:
+        embedded_minz_filter(embedded_filter filter)
+            : embedded_filter(filter.get())
+        {
+            rs2_error* e = nullptr;
+            if (!_embedded_filter || (rs2_is_embedded_filter_extendable_to(_embedded_filter.get(),
+                RS2_EXTENSION_MINZ_EMBEDDED_FILTER, &e) == 0 && !e))
             {
                 _embedded_filter.reset();
             }

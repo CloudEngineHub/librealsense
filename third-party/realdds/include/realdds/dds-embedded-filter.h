@@ -79,6 +79,14 @@ public:
     virtual ~dds_temporal_filter() = default;
 };
 
+// MinZ (HDRD near-range depth) filter implementation
+class dds_minz_filter : public dds_embedded_filter
+{
+public:
+    dds_minz_filter();
+    virtual ~dds_minz_filter() = default;
+};
+
 typedef std::vector< std::shared_ptr< dds_embedded_filter > > dds_embedded_filters;
 
 // Factory function to create appropriate filter based on type
