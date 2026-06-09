@@ -576,8 +576,9 @@ std::string const & get_string_( rs2_option value )
         CASE( SAFETY_MCU_TEMPERATURE )
         CASE( LEFT_IR_TEMPERATURE )
         CASE( EMBEDDED_FILTER_ENABLED )
-        CASE( MINZ_DISPARITY_SHIFT )
-        CASE( MINZ_THRESHOLD )
+        arr[RS2_OPTION_MINZ_DISPARITY_SHIFT] = "Disparity Shift";
+        arr[RS2_OPTION_MINZ_THRESHOLD] = "Threshold";
+        arr[RS2_OPTION_MINZ_DOWNSCALE_RATIO] = "Downscale Ratio";
 #undef CASE
         return arr;
     }();

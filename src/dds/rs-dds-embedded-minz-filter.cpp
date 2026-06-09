@@ -41,8 +41,7 @@ namespace librealsense {
         {
             // FW advertises ratio as dds_enum_option with choices {"1","2","4"}.
             // rs_dds_option exposes enum options as float = choice index, range [0..2].
-            // We reuse FILTER_MAGNITUDE since the semantics ("filter strength") match decimation's magnitude.
-            option_id = RS2_OPTION_FILTER_MAGNITUDE;
+            option_id = RS2_OPTION_MINZ_DOWNSCALE_RATIO;
         }
         else if (option->get_name() == DISPARITY_SHIFT_OPTION_NAME)
         {

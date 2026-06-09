@@ -135,8 +135,9 @@ extern "C" {
         RS2_OPTION_LEFT_IR_TEMPERATURE, /**< Temperature of the Left IR Sensor */
         
         RS2_OPTION_EMBEDDED_FILTER_ENABLED, /**< Enable/Disable Embedded Filter */
-        RS2_OPTION_MINZ_DISPARITY_SHIFT, /**< MinZ embedded filter: stereo disparity shift, 0..512 (pre-stream only) */
+        RS2_OPTION_MINZ_DISPARITY_SHIFT, /**< MinZ embedded filter: stereo disparity shift (pre-stream only) */
         RS2_OPTION_MINZ_THRESHOLD, /**< MinZ embedded filter: merge threshold in mm, 0..65000 (pre-stream only) */
+        RS2_OPTION_MINZ_DOWNSCALE_RATIO, /**< MinZ embedded filter: secondary-frame downscale ratio, choices 1/2/4 (pre-stream only) */
         RS2_OPTION_COUNT /**< Number of enumeration values. Not a valid input: intended to be used in for-loops. */
     } rs2_option;
 
