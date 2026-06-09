@@ -70,35 +70,35 @@ test_minz_filter = not is_fw_version_below(fw_version, MINZ_MIN_FW)
 
 if test_minz_filter:
     with test.closure("Get MinZ embedded filter options"):
-        minz_embedded_filter = depth_sensor.get_embedded_filter(rs.embedded_filter_type.minz)
+        minz_embedded_filter = depth_sensor.get_embedded_filter(rs.embedded_filter_type.improved_close_range_depth)
         test.check(minz_embedded_filter)
 
         minz_options = minz_embedded_filter.get_supported_options()
         test.check_equal(len(minz_options), 4)
         check_option_in_list(rs.option.embedded_filter_enabled, minz_options)
-        check_option_in_list(rs.option.minz_downscale_ratio, minz_options)
-        check_option_in_list(rs.option.minz_disparity_shift, minz_options)
-        check_option_in_list(rs.option.minz_threshold, minz_options)
+        check_option_in_list(rs.option.downscale_ratio, minz_options)
+        check_option_in_list(rs.option.disparity_shift, minz_options)
+        check_option_in_list(rs.option.threshold, minz_options)
 
     with test.closure("MinZ embedded filter defaults"):
         test.check_equal(minz_embedded_filter.get_option(rs.option.embedded_filter_enabled), MINZ_ENABLE_DEFAULT)
-        test.check_equal(minz_embedded_filter.get_option(rs.option.minz_downscale_ratio), MINZ_RATIO_DEFAULT_INDEX)
-        test.check_equal(minz_embedded_filter.get_option(rs.option.minz_disparity_shift), MINZ_SHIFT_DEFAULT)
-        test.check_equal(minz_embedded_filter.get_option(rs.option.minz_threshold), MINZ_THRESHOLD_DEFAULT)
+        test.check_equal(minz_embedded_filter.get_option(rs.option.downscale_ratio), MINZ_RATIO_DEFAULT_INDEX)
+        test.check_equal(minz_embedded_filter.get_option(rs.option.disparity_shift), MINZ_SHIFT_DEFAULT)
+        test.check_equal(minz_embedded_filter.get_option(rs.option.threshold), MINZ_THRESHOLD_DEFAULT)
 
     with test.closure("MinZ embedded filter set/get options"):
         # Disable first so we can safely permute downscale ratio without tripping the active-mutex on the device
         minz_embedded_filter.set_option(rs.option.embedded_filter_enabled, 0.0)
         # Ratio: index 2 -> choice "4" (quarter-res)
-        set_get_filter_option_value(minz_embedded_filter, rs.option.minz_downscale_ratio, 2.0)
-        set_get_filter_option_value(minz_embedded_filter, rs.option.minz_threshold, 600.0)
+        set_get_filter_option_value(minz_embedded_filter, rs.option.downscale_ratio, 2.0)
+        set_get_filter_option_value(minz_embedded_filter, rs.option.threshold, 600.0)
         # Restore enable for the metadata test below
         minz_embedded_filter.set_option(rs.option.embedded_filter_enabled, MINZ_ENABLE_DEFAULT)
 
     with test.closure("MinZ invalid ratio rejected"):
         # Ratio is an enum-index in [0..2] for choices "1"/"2"/"4" - 3.0 is out of range
         test.check_throws(
-            lambda: minz_embedded_filter.set_option(rs.option.minz_downscale_ratio, 3.0),
+            lambda: minz_embedded_filter.set_option(rs.option.downscale_ratio, 3.0),
             RuntimeError)
 
     waiting_for_test = False
