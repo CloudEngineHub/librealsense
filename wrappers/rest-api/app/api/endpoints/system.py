@@ -24,7 +24,7 @@ def _enable_metadata_elevated(timeout: float = 120.0) -> int:
           f"Arguments='-c \"{script}\"'; "
           f"Verb='runas'; UseShellExecute=$true; WindowStyle='Hidden'}}; "
           f"try {{ $p = [Diagnostics.Process]::Start($psi); $p.WaitForExit(); exit $p.ExitCode }} "
-          f"catch {{ exit $_.Exception.NativeErrorCode }}")
+          f"catch {{ $c = $_.Exception.NativeErrorCode; if (-not $c) {{ $c = 1 }}; exit $c }}")
     return subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps], timeout=timeout).returncode
 
 

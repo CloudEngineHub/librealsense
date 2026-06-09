@@ -601,6 +601,48 @@ class TestRealSenseAPI:
         response = client.get(f"/api/v1/webrtc/sessions/{session_id}")
         assert response.status_code == 404
 
+    # ----- /system/enable-metadata -----
+
+    def test_enable_metadata_noop_on_non_windows(self):
+        with patch("app.api.endpoints.system.platform.system", return_value="Linux"):
+            response = client.post("/api/v1/system/enable-metadata")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "noop"
+        assert "Windows-only" in body["note"]
+
+    def test_enable_metadata_windows_ok(self):
+        with patch("app.api.endpoints.system.platform.system", return_value="Windows"), \
+             patch("app.api.endpoints.system.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            response = client.post("/api/v1/system/enable-metadata")
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"
+
+    def test_enable_metadata_windows_declined(self):
+        with patch("app.api.endpoints.system.platform.system", return_value="Windows"), \
+             patch("app.api.endpoints.system.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 1223
+            response = client.post("/api/v1/system/enable-metadata")
+        assert response.status_code == 200
+        assert response.json()["status"] == "declined"
+
+    def test_enable_metadata_windows_failure(self):
+        with patch("app.api.endpoints.system.platform.system", return_value="Windows"), \
+             patch("app.api.endpoints.system.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 99
+            response = client.post("/api/v1/system/enable-metadata")
+        assert response.status_code == 500
+        assert "exit 99" in response.json()["detail"]
+
+    def test_enable_metadata_windows_timeout(self):
+        import subprocess as _subprocess
+        with patch("app.api.endpoints.system.platform.system", return_value="Windows"), \
+             patch("app.api.endpoints.system.subprocess.run",
+                   side_effect=_subprocess.TimeoutExpired(cmd="powershell.exe", timeout=120)):
+            response = client.post("/api/v1/system/enable-metadata")
+        assert response.status_code == 504
+
 
 class TestRealSenseAPIIntegration:
     """
