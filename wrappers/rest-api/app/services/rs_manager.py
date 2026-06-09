@@ -2,6 +2,7 @@
 # Copyright(c) 2026 RealSense, Inc. All Rights Reserved.
 
 import asyncio
+import platform
 import threading
 import time
 import logging
@@ -25,6 +26,8 @@ from datetime import datetime
 
 from app.services.metadata_socket_server import MetadataSocketServer
 
+
+_IS_WINDOWS = platform.system() == "Windows"
 
 FW_STATUS_UNKNOWN = "unknown"
 
@@ -242,6 +245,13 @@ class RealSenseManager:
                     except RuntimeError:
                         pass
 
+                metadata_enabled: Optional[bool] = None  # None on non-Windows / unsupported devices
+                if _IS_WINDOWS:
+                    try:
+                        metadata_enabled = dev.is_metadata_enabled()
+                    except RuntimeError:
+                        pass
+
                 # Create device info object
                 device_info = DeviceInfo(
                     device_id=device_id,
@@ -256,6 +266,7 @@ class RealSenseManager:
                     product_id=product_id,
                     sensors=sensors,
                     is_streaming=device_id in self.pipelines,
+                    metadata_enabled=metadata_enabled,
                 )
 
                 self.device_infos[device_id] = device_info

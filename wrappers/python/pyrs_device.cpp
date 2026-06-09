@@ -96,6 +96,13 @@ void init_device(py::module &m) {
             return rs2::metadata_helper::instance().is_enabled(id);
         });
 
+    m.def("enable_metadata", []() {
+        rs2::metadata_helper::instance().enable_metadata();
+    }, "Enable per-frame metadata at OS level for connected D400/D500 devices. "
+       "Windows: writes HKLM UVC registry keys; must be called from an admin process. "
+       "Throws RuntimeError on failure.",
+       py::call_guard<py::gil_scoped_release>());
+
     // not binding update_progress_callback, templated
 
     py::class_<rs2::updatable, rs2::device, py_holder<rs2::updatable>> updatable(m, "updatable"); // No docstring in C++
