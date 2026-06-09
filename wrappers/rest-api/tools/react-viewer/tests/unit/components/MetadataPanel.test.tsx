@@ -73,6 +73,25 @@ describe('MetadataOverlay', () => {
     render(<MetadataOverlay streamType="color" metadata={baseMetadata} fps={30} />)
     expect(screen.getByText(/Frame Metadata — COLOR/)).toBeInTheDocument()
   })
+
+  it('shows OS-level warning when clock_domain is system_time', () => {
+    const md: StreamMetadata = { ...baseMetadata, clock_domain: 'system_time' }
+    render(<MetadataOverlay streamType="depth" metadata={md} fps={30} />)
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent('Per-frame metadata is not enabled at the OS level!')
+    expect(alert).toHaveTextContent('Please follow the installation guide for the details.')
+  })
+
+  it('does not show OS-level warning when clock_domain is global_time', () => {
+    render(<MetadataOverlay streamType="depth" metadata={baseMetadata} fps={30} />)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('does not show OS-level warning when clock_domain is hardware_clock', () => {
+    const md: StreamMetadata = { ...baseMetadata, clock_domain: 'hardware_clock' }
+    render(<MetadataOverlay streamType="depth" metadata={md} fps={30} />)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
 })
 
 describe('MetadataPanel', () => {
