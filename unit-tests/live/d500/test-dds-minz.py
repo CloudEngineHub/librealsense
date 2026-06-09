@@ -13,13 +13,13 @@ import pyrsutils as rsutils
 import time
 
 
-# MinZ defaults per HDRD MinZ Depth - Host API Interface spec v0.5,
+# MinZ defaults per HDRD MinZ Depth - Host API Interface spec,
 # cross-checked against FW-advertised "Improved Close Range Depth" filter JSON.
 #
 # The downscale ratio is exposed by FW as a dds_enum_option with choices ["1","2","4"];
 # librealsense exposes enum options as float = choice index.
 # Default choice is "2", which is index 1.
-MINZ_ENABLE_DEFAULT = 1.0
+MINZ_ENABLE_DEFAULT = 0.0        # spec updated: filter defaults to OFF
 MINZ_RATIO_DEFAULT_INDEX = 1.0   # choices ["1","2","4"], default "2" -> index 1
 MINZ_SHIFT_DEFAULT = 0.0
 MINZ_THRESHOLD_DEFAULT = 550.0
