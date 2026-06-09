@@ -632,6 +632,9 @@ interface MetadataOverlayProps {
 export function MetadataOverlay({ streamType, metadata, fps }: MetadataOverlayProps) {
   const frameMd = metadata.frame_metadata ?? {}
   const isMotion = ['gyro', 'accel', 'motion'].includes(streamType.toLowerCase())
+  // Mirrors C++ viewer (common/stream-model.cpp): when SDK falls back to system_time,
+  // per-frame metadata is unavailable from the kernel UVC driver.
+  const metadataUnavailable = metadata.clock_domain === 'system_time'
   return (
     <div className="absolute inset-0 overflow-y-auto bg-black/60 text-white text-xs z-10">
       <div className="sticky top-0 px-3 py-2 bg-gray-800 font-semibold border-b border-gray-700">
@@ -650,6 +653,15 @@ export function MetadataOverlay({ streamType, metadata, fps }: MetadataOverlayPr
           <MetadataItem label="Viewer FPS" value={fps} />
         </div>
       </div>
+      {metadataUnavailable && (
+        <div
+          role="alert"
+          className="px-3 py-2 border-b border-red-900/60 bg-red-950/40 text-red-300 text-xs leading-tight"
+        >
+          <div>Per-frame metadata is not enabled at the OS level!</div>
+          <div>Please follow the installation guide for the details.</div>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 p-3 font-mono">
         {Object.entries(frameMd).map(([k, v]) => (
           <MetadataItem key={k} label={lessScreamy(k)} value={v} />
