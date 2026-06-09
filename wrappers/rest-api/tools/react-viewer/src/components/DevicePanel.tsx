@@ -1,14 +1,57 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ReactElement } from 'react'
+import type { MutableRefObject, ReactElement } from 'react'
 import { useAppStore } from '../store'
 import type { DeviceInfo, SensorInfo, OptionInfo, StreamConfig, DeviceState, FirmwareState, SensorConfig } from '../api/types'
 import { FirmwareProgressModal } from './FirmwareProgressModal'
-import { ToastContainer, type ToastType } from './Toast'
+import { ToastContainer, type ToastType, type ToastAction } from './Toast'
 
 interface Toast {
   id: string
   type: ToastType
   message: string
+  action?: ToastAction
+}
+
+// Toast once per disabled-device set; re-arm when the set becomes empty.
+function showMetadataEnablePromptIfNeeded(
+  devices: DeviceInfo[],
+  promptedSetRef: MutableRefObject<string>,
+  enableInFlightRef: MutableRefObject<boolean>,
+  addToast: (type: ToastType, message: string, action?: ToastAction) => void,
+  removeToast: (id: string) => void,
+  enableMetadata: () => Promise<{ status: string; note?: string }>,
+): void {
+  const disabledIds = devices
+    .filter(d => d.device_id && d.metadata_enabled === false)
+    .map(d => d.device_id)
+    .sort()
+    .join(' ')
+  if (!disabledIds) { promptedSetRef.current = ''; return }
+  if (disabledIds === promptedSetRef.current) return
+  promptedSetRef.current = disabledIds
+  addToast(
+    'info',
+    'Frame metadata is disabled for connected RealSense devices on this Windows host. ' +
+      'Enable it once (admin required) to surface per-frame metadata.',
+    {
+      label: 'Enable',
+      onClick: async (toastId) => {
+        if (enableInFlightRef.current) return
+        enableInFlightRef.current = true
+        try {
+          const result = await enableMetadata()
+          removeToast(toastId)
+          const variant = result.status === 'ok' ? 'success' : 'info'
+          addToast(variant, result.note ?? 'Done.')
+        } catch (err: any) {
+          removeToast(toastId)
+          addToast('error', `Failed to enable metadata: ${err?.response?.data?.detail ?? err?.message ?? 'unknown error'}`)
+        } finally {
+          enableInFlightRef.current = false
+        }
+      },
+    },
+  )
 }
 
 // Reusable hidden-file-input hook. Returns the JSX to render once at a stable
@@ -44,6 +87,7 @@ export function DevicePanel() {
     deviceStates,
     isLoadingDevices,
     fetchDevices,
+    enableMetadata,
     toggleDeviceActive,
     resetDevice,
     error,
@@ -64,12 +108,12 @@ export function DevicePanel() {
   const [firmwareFileName, setFirmwareFileName] = useState<string | null>(null)
 
   useEffect(() => {
-    fetchDevices()
+    fetchDevices(true)
   }, [fetchDevices])
 
-  const addToast = (type: ToastType, message: string) => {
+  const addToast = (type: ToastType, message: string, action?: ToastAction) => {
     const id = Date.now().toString()
-    setToasts((prev) => [...prev, { id, type, message }])
+    setToasts((prev) => [...prev, { id, type, message, action }])
   }
 
   const removeToast = (id: string) => {
@@ -131,6 +175,12 @@ export function DevicePanel() {
     })
     updateFirmwareFromFile(deviceId, file)
   }
+
+  const promptedSetRef = useRef<string>('')
+  const enableInFlightRef = useRef<boolean>(false)
+  useEffect(() => {
+    showMetadataEnablePromptIfNeeded(devices, promptedSetRef, enableInFlightRef, addToast, removeToast, enableMetadata)
+  }, [devices])
 
   return (
     <div className="p-4">

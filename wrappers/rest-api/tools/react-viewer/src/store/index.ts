@@ -113,6 +113,7 @@ interface AppState {
   isLoadingDevices: boolean
   hasUserInteracted: boolean // Track if user manually toggled a device (skip auto-activate)
   fetchDevices: (forceRefresh?: boolean) => Promise<void>
+  enableMetadata: () => Promise<{ status: string; note?: string }>
   checkFirmwareUpdates: (deviceId: string) => Promise<void>
   updateFirmwareFromFile: (deviceId: string, file: File) => Promise<void>
 
@@ -356,6 +357,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
         }
       })
     }
+  },
+
+  enableMetadata: async () => {
+    const result = await apiClient.enableMetadata()
+    if (result.status === 'ok') await get().fetchDevices(true)
+    return result
   },
 
   checkFirmwareUpdates: async (deviceId: string) => {

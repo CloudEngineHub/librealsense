@@ -321,6 +321,13 @@ class ApiClient {
   async closeWebRTCSession(sessionId: string): Promise<void> {
     await this.client.delete(`/webrtc/sessions/${sessionId}/`)
   }
+
+  // ============ System ============
+
+  async enableMetadata(): Promise<{ status: string; note?: string }> {
+    const response = await this.client.post<{ status: string; note?: string }>('/system/enable-metadata')
+    return response.data
+  }
 }
 
 export const apiClient = new ApiClient()
