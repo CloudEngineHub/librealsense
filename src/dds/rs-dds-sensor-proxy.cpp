@@ -36,7 +36,7 @@
 #include <dds/rs-dds-device-proxy.h>
 #include <dds/rs-dds-embedded-decimation-filter.h>
 #include <dds/rs-dds-embedded-temporal-filter.h>
-#include <dds/rs-dds-embedded-minz-filter.h>
+#include <dds/rs-dds-embedded-close-range-filter.h>
 
 #include <src/ds/ds-private.h>
 
@@ -1019,9 +1019,9 @@ void dds_sensor_proxy::add_embedded_filter( std::shared_ptr< realdds::dds_embedd
                 return _dev->query_embedded_filter(embedded_filter);
             });
     }
-    else if (auto minz_filter = std::dynamic_pointer_cast< dds_minz_filter >(embedded_filter))
+    else if (auto close_range_filter = std::dynamic_pointer_cast< dds_close_range_filter >(embedded_filter))
     {
-        rs_embedded_filter = std::make_shared< rs_dds_embedded_minz_filter >(
+        rs_embedded_filter = std::make_shared< rs_dds_embedded_close_range_filter >(
             embedded_filter,
             [=](json options_value)
             {

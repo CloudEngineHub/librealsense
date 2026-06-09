@@ -322,7 +322,7 @@ const char* get_string(rs2_embedded_filter_type embedded_filter_type)
     {
         CASE(DECIMATION)
         CASE(TEMPORAL)
-        case RS2_EMBEDDED_FILTER_TYPE_MINZ: return "Improved Close Range Depth";
+        case RS2_EMBEDDED_FILTER_TYPE_CLOSE_RANGE: return "Improved Close Range Depth";
     default:
         assert(!is_valid(embedded_filter_type));
         return UNKNOWN_VALUE;
@@ -416,7 +416,7 @@ const char * get_string( rs2_extension value )
     CASE( SUPPORTED_EMBEDDED_FILTERS )
     CASE( DECIMATION_EMBEDDED_FILTER )
     CASE( TEMPORAL_EMBEDDED_FILTER )
-    CASE( MINZ_EMBEDDED_FILTER )
+    CASE( CLOSE_RANGE_EMBEDDED_FILTER )
     CASE( INFERENCE_FRAME )
     CASE( OBJECT_DETECTION_FRAME )
     CASE( INFERENCE_SENSOR )
@@ -576,13 +576,9 @@ std::string const & get_string_( rs2_option value )
         CASE( SAFETY_MCU_TEMPERATURE )
         CASE( LEFT_IR_TEMPERATURE )
         CASE( EMBEDDED_FILTER_ENABLED )
-        // MinZ options bypass the CASE macro: the auto-derived label would be "Minz Disparity Shift" / etc.
-        // We want the UI to show the un-prefixed names ("Disparity Shift", "Threshold", "Downscale Ratio")
-        // since the filter is already shown as "Improved Close Range Depth" in the embedded-filters panel,
-        // so the MinZ prefix would be redundant context noise.
-        arr[RS2_OPTION_MINZ_DISPARITY_SHIFT] = "Disparity Shift";
-        arr[RS2_OPTION_MINZ_THRESHOLD] = "Threshold";
-        arr[RS2_OPTION_MINZ_DOWNSCALE_RATIO] = "Downscale Ratio";
+        CASE( DISPARITY_SHIFT )
+        CASE( THRESHOLD )
+        CASE( DOWNSCALE_RATIO )
 #undef CASE
         return arr;
     }();

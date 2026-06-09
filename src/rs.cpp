@@ -40,7 +40,7 @@
 #include "proc/sequence-id-filter.h"
 #include "proc/decimation-embedded-filter.h"
 #include "proc/temporal-embedded-filter.h"
-#include "proc/minz-embedded-filter.h"
+#include "proc/close-range-embedded-filter.h"
 #include "media/playback/playback_device.h"
 #include "stream.h"
 #include <librealsense2/h/rs_types.h>
@@ -2071,7 +2071,7 @@ int rs2_is_embedded_filter_extendable_to(const rs2_embedded_filter* embedded_fil
     {
     case RS2_EXTENSION_DECIMATION_EMBEDDED_FILTER: return VALIDATE_INTERFACE_NO_THROW((embedded_filter_interface*)(embedded_filter->_embedded_filter.get()), librealsense::decimation_embedded_filter) != nullptr;
     case RS2_EXTENSION_TEMPORAL_EMBEDDED_FILTER: return VALIDATE_INTERFACE_NO_THROW((embedded_filter_interface*)(embedded_filter->_embedded_filter.get()), librealsense::temporal_embedded_filter) != nullptr;
-    case RS2_EXTENSION_MINZ_EMBEDDED_FILTER: return VALIDATE_INTERFACE_NO_THROW((embedded_filter_interface*)(embedded_filter->_embedded_filter.get()), librealsense::minz_embedded_filter) != nullptr;
+    case RS2_EXTENSION_CLOSE_RANGE_EMBEDDED_FILTER: return VALIDATE_INTERFACE_NO_THROW((embedded_filter_interface*)(embedded_filter->_embedded_filter.get()), librealsense::close_range_embedded_filter) != nullptr;
     default:
         return false;
     }

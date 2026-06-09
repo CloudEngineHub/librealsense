@@ -9,12 +9,12 @@
 #include <src/core/options-watcher.h>
 
 namespace librealsense {
-class minz_embedded_filter
+class close_range_embedded_filter
     : virtual public embedded_filter_interface
     , public options_container
 {
 public:
-    virtual ~minz_embedded_filter() = default;
+    virtual ~close_range_embedded_filter() = default;
 
     rsutils::subscription register_options_changed_callback(options_watcher::callback&&) override;
 
@@ -22,6 +22,6 @@ protected:
     options_watcher _options_watcher;
 };
 
-MAP_EXTENSION( RS2_EXTENSION_MINZ_EMBEDDED_FILTER, librealsense::minz_embedded_filter);
+MAP_EXTENSION( RS2_EXTENSION_CLOSE_RANGE_EMBEDDED_FILTER, librealsense::close_range_embedded_filter);
 
 }  // namespace librealsense

@@ -168,8 +168,8 @@ dds_temporal_filter::dds_temporal_filter()
     _name = "Temporal Filter";
 }
 
-// MinZ (advertised by FW as "Improved Close Range Depth") filter implementation
-dds_minz_filter::dds_minz_filter()
+// Improved Close Range Depth filter implementation
+dds_close_range_filter::dds_close_range_filter()
     : dds_embedded_filter()
 {
     _name = "Improved Close Range Depth";
@@ -183,7 +183,7 @@ std::shared_ptr<dds_embedded_filter> create_embedded_filter(const std::string& f
     else if ( filter_name == "Temporal Filter")
         return std::make_shared<dds_temporal_filter>();
     else if ( filter_name == "Improved Close Range Depth")
-        return std::make_shared<dds_minz_filter>();
+        return std::make_shared<dds_close_range_filter>();
     else
         DDS_THROW(runtime_error, "Unknown embedded filter name: " + filter_name);
 }

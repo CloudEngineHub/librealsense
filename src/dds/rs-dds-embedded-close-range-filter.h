@@ -5,27 +5,27 @@
 #include <rsutils/json-fwd.h>
 #include <realdds/dds-embedded-filter.h>
 #include <dds/rs-dds-embedded-filter.h>
-#include <src/proc/minz-embedded-filter.h>
+#include <src/proc/close-range-embedded-filter.h>
 
 
 namespace librealsense {
 
-    // Class librealsense::rs_dds_embedded_minz_filter:
-    // A facade for a realdds::dds_minz_filter exposing librealsense interface
-    // handles librealsense embedded MinZ filter specific logic and parameter validation
-    // Communication to HW is delegated to realdds::dds_minz_filter
-    class rs_dds_embedded_minz_filter
+    // Class librealsense::rs_dds_embedded_close_range_filter:
+    // A facade for a realdds::dds_close_range_filter exposing the librealsense
+    // embedded-filter interface. Handles parameter validation; communication to
+    // HW is delegated to realdds::dds_close_range_filter.
+    class rs_dds_embedded_close_range_filter
         : public rs_dds_embedded_filter
-        , public minz_embedded_filter
+        , public close_range_embedded_filter
     {
     public:
-        rs_dds_embedded_minz_filter(const std::shared_ptr< realdds::dds_embedded_filter >& dds_embedded_filter,
+        rs_dds_embedded_close_range_filter(const std::shared_ptr< realdds::dds_embedded_filter >& dds_embedded_filter,
             set_embedded_filter_callback set_embedded_filter_cb,
             query_embedded_filter_callback query_embedded_filter_cb);
-        virtual ~rs_dds_embedded_minz_filter() = default;
+        virtual ~rs_dds_embedded_close_range_filter() = default;
 
         // Override interface methods
-        inline rs2_embedded_filter_type get_type() const override { return RS2_EMBEDDED_FILTER_TYPE_MINZ; }
+        inline rs2_embedded_filter_type get_type() const override { return RS2_EMBEDDED_FILTER_TYPE_CLOSE_RANGE; }
 
         // Override abstract class methods
         virtual void add_option(std::shared_ptr< realdds::dds_option > option) override;
