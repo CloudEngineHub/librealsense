@@ -37,7 +37,7 @@ namespace librealsense {
         {
             option_id = RS2_OPTION_EMBEDDED_FILTER_ENABLED;
         }
-        else if (option->get_name() == MAGNITUDE_OPTION_NAME)
+        else if (option->get_name() == DOWNSCALE_RATIO_OPTION_NAME)
         {
             // FW advertises ratio as dds_enum_option with choices {"1","2","4"}.
             // rs_dds_option exposes enum options as float = choice index, range [0..2].
@@ -54,12 +54,6 @@ namespace librealsense {
         else
         {
             throw std::runtime_error("option '" + option->get_name() + "' not in this filter");
-        }
-
-        if (!is_valid(option_id))
-        {
-            LOG_ERROR("Option '" << option->get_name() << "' not found");
-            throw librealsense::invalid_value_exception("Option '" + option->get_name() + "' not found");
         }
 
         if (get_option_handler(option_id))
@@ -92,56 +86,26 @@ namespace librealsense {
         _options_watcher.register_option( option_id, opt );
     }
 
-    void rs_dds_embedded_minz_filter::validate_filter_option(rsutils::json option_j) const
+    void rs_dds_embedded_minz_filter::validate_filter_option( rsutils::json const & option_j ) const
     {
-        if (option_j.contains(ENABLE_OPTION_NAME))
+        // Enable: int with FW-advertised range [0..1] - rs_dds_option range check covers it, no extra host-side check needed.
+        // Downscale ratio: dds_enum_option (choices "1"/"2"/"4") - rs_dds_option validates the choice index.
+        if( option_j.contains( DISPARITY_SHIFT_OPTION_NAME ) )
         {
-            validate_enable_option(option_j);
+            validate_disparity_shift_option( option_j );
         }
-        else if (option_j.contains(MAGNITUDE_OPTION_NAME))
+        else if( option_j.contains( THRESHOLD_OPTION_NAME ) )
         {
-            // Downscale ratio is a dds_enum_option (choices "1"/"2"/"4");
-            // rs_dds_option already validates the choice index and string conversion,
-            // so no extra host-side check is needed.
+            validate_threshold_option( option_j );
         }
-        else if (option_j.contains(DISPARITY_SHIFT_OPTION_NAME))
+        else if( ! option_j.contains( ENABLE_OPTION_NAME ) && ! option_j.contains( DOWNSCALE_RATIO_OPTION_NAME ) )
         {
-            validate_disparity_shift_option(option_j);
-        }
-        else if (option_j.contains(THRESHOLD_OPTION_NAME))
-        {
-            validate_threshold_option(option_j);
-        }
-        else
-        {
-            throw std::runtime_error("Option json must contain a key matching one of the options name");
+            throw std::runtime_error( "Option json must contain a key matching one of the options name" );
         }
         // Validation passed - parameter is valid
     }
 
-    void rs_dds_embedded_minz_filter::validate_enable_option(rsutils::json opt_j) const
-    {
-        auto dds_enable = find_dds_option_by_name(_dds_ef->get_options(), ENABLE_OPTION_NAME);
-        int32_t enable_val = opt_j[ENABLE_OPTION_NAME].get<int32_t>();
-
-        if (!dds_enable->get_minimum_value().is_null() && enable_val < dds_enable->get_minimum_value().get<int32_t>())
-        {
-            throw std::invalid_argument("Enable value " + std::to_string(enable_val) +
-                " is below minimum " + std::to_string(dds_enable->get_minimum_value().get<int32_t>()));
-        }
-        if (!dds_enable->get_maximum_value().is_null() && enable_val > dds_enable->get_maximum_value().get<int32_t>())
-        {
-            throw std::invalid_argument("Enable value " + std::to_string(enable_val) +
-                " is above maximum " + std::to_string(dds_enable->get_maximum_value().get<int32_t>()));
-        }
-
-        if (enable_val != 0 && enable_val != 1)
-        {
-            throw std::runtime_error("Enable shall be 0 for OFF or 1 for ON");
-        }
-    }
-
-    void rs_dds_embedded_minz_filter::validate_disparity_shift_option(rsutils::json opt_j) const
+    void rs_dds_embedded_minz_filter::validate_disparity_shift_option( rsutils::json const & opt_j ) const
     {
         auto dds_shift = find_dds_option_by_name(_dds_ef->get_options(), DISPARITY_SHIFT_OPTION_NAME);
         int32_t shift_val = opt_j[DISPARITY_SHIFT_OPTION_NAME].get<int32_t>();
@@ -158,7 +122,7 @@ namespace librealsense {
         }
     }
 
-    void rs_dds_embedded_minz_filter::validate_threshold_option(rsutils::json opt_j) const
+    void rs_dds_embedded_minz_filter::validate_threshold_option( rsutils::json const & opt_j ) const
     {
         auto dds_thresh = find_dds_option_by_name(_dds_ef->get_options(), THRESHOLD_OPTION_NAME);
         int32_t thresh_val = opt_j[THRESHOLD_OPTION_NAME].get<int32_t>();

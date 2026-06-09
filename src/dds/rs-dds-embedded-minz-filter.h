@@ -31,16 +31,16 @@ namespace librealsense {
         virtual void add_option(std::shared_ptr< realdds::dds_option > option) override;
 
     private:
-        void validate_filter_option(rsutils::json option_j) const;
-        void validate_enable_option(rsutils::json opt_j) const;
-        void validate_disparity_shift_option(rsutils::json opt_j) const;
-        void validate_threshold_option(rsutils::json opt_j) const;
+        void validate_filter_option( rsutils::json const & option_j ) const;
+        void validate_disparity_shift_option( rsutils::json const & opt_j ) const;
+        void validate_threshold_option( rsutils::json const & opt_j ) const;
 
-        // FW-advertised option names (see "Improved Close Range Depth" filter on the depth stream).
-        const std::string ENABLE_OPTION_NAME = "Enable";
-        const std::string MAGNITUDE_OPTION_NAME = "Secondary frame downscale ratio";  // dds_enum_option, choices {"1","2","4"}
-        const std::string DISPARITY_SHIFT_OPTION_NAME = "Secondary frame disparity shift";
-        const std::string THRESHOLD_OPTION_NAME = "Threshold";
+        // FW-advertised option names for the "Improved Close Range Depth" filter.
+        // static constexpr avoids per-instance std::string allocation/copy.
+        static constexpr const char * ENABLE_OPTION_NAME          = "Enable";
+        static constexpr const char * DOWNSCALE_RATIO_OPTION_NAME = "Secondary frame downscale ratio";  // dds_enum_option, choices {"1","2","4"}
+        static constexpr const char * DISPARITY_SHIFT_OPTION_NAME = "Secondary frame disparity shift";
+        static constexpr const char * THRESHOLD_OPTION_NAME       = "Threshold";
     };
 
 }  // namespace librealsense
