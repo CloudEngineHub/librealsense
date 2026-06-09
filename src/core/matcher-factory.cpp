@@ -51,7 +51,7 @@ std::shared_ptr< matcher > matcher_factory::create_DLR_C_matcher( std::vector< s
     {
         return create_timestamp_composite_matcher( { create_DLR_matcher( profiles ),
                                                      create_color_composite_matcher( color ),
-                                                     create_timestamp_matcher( infer ) } );
+                                                     create_identity_matcher( infer ) } );
     }
 
     return create_timestamp_composite_matcher( { create_DLR_matcher( profiles ), create_color_composite_matcher( color ) } );
@@ -104,11 +104,11 @@ std::shared_ptr< matcher > matcher_factory::create_DIC_matcher( std::vector< str
 {
     std::vector< std::shared_ptr< matcher > > matchers;
     if( auto depth = find_profile( RS2_STREAM_DEPTH, -1, profiles ) )
-        matchers.push_back( create_identity_matcher( depth ) );
+        matchers.push_back( create_identity_matcher( { depth } ) );
     if( auto ir = find_profile( RS2_STREAM_INFRARED, -1, profiles ) )
-        matchers.push_back( create_identity_matcher( ir ) );
+        matchers.push_back( create_identity_matcher( { ir } ) );
     if( auto confidence = find_profile( RS2_STREAM_CONFIDENCE, -1, profiles ) )
-        matchers.push_back( create_identity_matcher( confidence ) );
+        matchers.push_back( create_identity_matcher( { confidence } ) );
 
     if( matchers.empty() )
     {
@@ -154,9 +154,14 @@ matcher_factory::create_timestamp_matcher( std::vector< stream_interface * > con
 }
 
 
-std::shared_ptr< matcher > matcher_factory::create_identity_matcher( stream_interface * profile )
+std::shared_ptr< matcher >
+matcher_factory::create_identity_matcher( std::vector< stream_interface * > const & profiles )
 {
-    return std::make_shared< identity_matcher >( profile->get_unique_id(), profile->get_stream_type() );
+    std::vector< std::shared_ptr< matcher > > matchers;
+    for( auto & p : profiles )
+        matchers.push_back( std::make_shared< identity_matcher >( p->get_unique_id(), p->get_stream_type() ) );
+
+    return std::make_shared< composite_identity_matcher >( matchers );
 }
 
 std::shared_ptr< matcher >
