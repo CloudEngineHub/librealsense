@@ -11,28 +11,35 @@ namespace librealsense {
 
 namespace {
 
-// 38-byte dppc_ctl wire payload, packed per HDRD MinZ Depth - Host API Interface §2.2.
+// Depth XU control coordinates for the close-range filter.
+constexpr uint8_t  XU_SELECTOR             = 0x14;
+constexpr uint16_t CTL_ID                  = 0x0008;
+constexpr uint8_t  DPPC_VERSION            = 0x01;
+constexpr uint8_t  DPPC_FLAGS              = 0x01;
+constexpr uint8_t  DPPC_PARAM_COUNT        = 4;
+constexpr uint8_t  DPPC_PARAM_TYPE_INTEGER = 0x00;
+
+// 38-byte wire payload, packed per the depth XU control format.
 #pragma pack(push, 1)
 struct dppc_ctl
 {
-    uint8_t  version;       // 0x01
-    uint8_t  flags;         // 0x01
-    uint16_t ctl_id;        // 0x0008 (FW: dpp_minz_filter)
-    uint8_t  param_count;   // 4
-    uint8_t  param_type;    // 0x00 (integer)
-    int32_t  params[8];     // [enable, downscale_ratio, disparity_shift, threshold, reserved...]
+    uint8_t  version;
+    uint8_t  flags;
+    uint16_t ctl_id;
+    uint8_t  param_count;
+    uint8_t  param_type;
+    int32_t  params[8];  // [enable, downscale_ratio, disparity_shift, threshold, reserved...]
 };
 #pragma pack(pop)
 static_assert( sizeof( dppc_ctl ) == 38, "dppc_ctl must be exactly 38 bytes" );
 
-// Fill the header fields in case FW didn't echo them back on GET_CUR.
 void stamp_header( dppc_ctl & p )
 {
-    p.version     = 0x01;
-    p.flags       = 0x01;
-    p.ctl_id      = close_range_xu_option::CTL_ID;
-    p.param_count = 4;
-    p.param_type  = 0x00;
+    p.version     = DPPC_VERSION;
+    p.flags       = DPPC_FLAGS;
+    p.ctl_id      = CTL_ID;
+    p.param_count = DPPC_PARAM_COUNT;
+    p.param_type  = DPPC_PARAM_TYPE_INTEGER;
 }
 
 }  // anonymous
@@ -57,16 +64,15 @@ void close_range_xu_option::set( float value )
     ep->invoke_powered(
         [this, value]( platform::uvc_device & dev )
         {
-            dppc_ctl payload = {};
-
-            // Read current payload first so we preserve the FW's current
+            // Read current payload so we preserve the device's current
             // downscale_ratio / disparity_shift / threshold values.
+            dppc_ctl payload = {};
             if( ! dev.get_xu( ds::depth_xu,
                               XU_SELECTOR,
                               reinterpret_cast< uint8_t * >( &payload ),
                               sizeof( payload ) ) )
             {
-                throw invalid_value_exception( "Close Range get_xu(0x14) failed before set" );
+                throw invalid_value_exception( "Close Range get_xu failed before set" );
             }
 
             stamp_header( payload );
@@ -77,7 +83,7 @@ void close_range_xu_option::set( float value )
                               reinterpret_cast< uint8_t * >( &payload ),
                               sizeof( payload ) ) )
             {
-                throw invalid_value_exception( "Close Range set_xu(0x14) failed" );
+                throw invalid_value_exception( "Close Range set_xu failed" );
             }
 
             _record( *this );
@@ -99,7 +105,7 @@ float close_range_xu_option::query() const
                               reinterpret_cast< uint8_t * >( &payload ),
                               sizeof( payload ) ) )
             {
-                throw invalid_value_exception( "Close Range get_xu(0x14) failed" );
+                throw invalid_value_exception( "Close Range get_xu failed" );
             }
             return static_cast< float >( payload.params[0] );
         } );

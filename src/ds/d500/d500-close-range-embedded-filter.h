@@ -1,5 +1,6 @@
 // License: Apache 2.0. See LICENSE file in root directory.
 // Copyright(c) 2026 RealSense, Inc. All Rights Reserved.
+
 #pragma once
 
 #include <src/proc/close-range-embedded-filter.h>
@@ -9,16 +10,10 @@
 #include <functional>
 #include <memory>
 
+
 namespace librealsense {
 
-// USB XU wrapper for the Improved Close Range Depth filter.
-// Spec: HDRD MinZ Depth - Host API Interface §2 (USB API).
-//
-// Wire format: 38-byte dppc_ctl payload on Depth XU selector 0x14.
-// The class exposes ONLY the `enable` field (params[0]) as a float-valued option;
-// the other three fields (downscale_ratio / disparity_shift / threshold) are read from
-// the device via GET_CUR and echoed back unchanged on SET_CUR so the FW state stays
-// internally consistent.
+// Single-option (Enable) wrapper around the depth-XU close-range control.
 class close_range_xu_option : public option
 {
 public:
@@ -34,17 +29,13 @@ public:
     }
     void enable_recording( std::function< void( const option & ) > rec ) override { _record = rec; }
 
-    static constexpr uint8_t  XU_SELECTOR = 0x14;  // csEU_CONTROL_MINZ_FILTER (FW name)
-    static constexpr uint16_t CTL_ID      = 0x0008;  // dpp_minz_filter (FW name)
-
 private:
     std::weak_ptr< uvc_sensor > _ep;
     std::function< void( const option & ) > _record = []( const option & ) {};
 };
 
 
-// USB-backed concrete of close_range_embedded_filter — surfaces in the viewer's
-// Embedded Filters panel under the depth sensor with a single Enable option.
+// Improved Close Range Depth embedded filter for D5xx devices.
 class d500_close_range_embedded_filter : public close_range_embedded_filter
 {
 public:
