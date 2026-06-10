@@ -172,5 +172,12 @@ def test_basic_color(test_device, test_context_var):
             ((1280,720), 15),
         ]
 
+    # D436 color stream returns near-black frames at >30 fps with Auto-Exposure ON
+    # (reproduced on FW 5.17.3.10 and 5.17.3.21, and in realsense-viewer).
+    # Restrict to <=30 fps until the FW issue is fixed.
+    product_name = dev.get_info(rs.camera_info.name)
+    if "D436" in product_name:
+        configurations = [c for c in configurations if c[1] <= 30]
+
     for resolution, fps in configurations:
         run_test(dev, ctx, resolution, fps)
