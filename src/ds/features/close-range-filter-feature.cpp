@@ -13,7 +13,7 @@ namespace librealsense {
 /* static */ const feature_id close_range_filter_feature::ID = "Close range filter feature";
 
 close_range_filter_feature::close_range_filter_feature( d500_depth_sensor & depth_sensor,
-                                                        std::weak_ptr< uvc_sensor > raw_depth_ep )
+                                                        std::shared_ptr< uvc_sensor > const & raw_depth_ep )
 {
     depth_sensor.add_embedded_filter( std::make_shared< d500_close_range_embedded_filter >( raw_depth_ep ) );
 }

@@ -18,7 +18,7 @@ class close_range_filter_feature : public feature_interface
 public:
     static const feature_id ID;
 
-    close_range_filter_feature( d500_depth_sensor & depth_sensor, std::weak_ptr< uvc_sensor > raw_depth_ep );
+    close_range_filter_feature( d500_depth_sensor & depth_sensor, std::shared_ptr< uvc_sensor > const & raw_depth_ep );
 
     feature_id get_id() const override;
 };

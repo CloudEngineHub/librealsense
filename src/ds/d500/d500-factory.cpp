@@ -23,6 +23,7 @@
 #include <src/ds/ds-thermal-monitor.h>
 #include <src/ds/d500/d500-options.h>
 #include <src/ds/d500/d500-auto-calibration.h>
+#include <src/ds/features/close-range-filter-feature.h>
 
 #include <src/platform/platform-utils.h>
 
@@ -332,6 +333,14 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
                 depth_sensor.register_option( RS2_OPTION_THERMAL_COMPENSATION,
                                               std::make_shared< thermal_compensation >( _thermal_monitor, thermal_compensation_toggle ) );
             } );  // group_multiple_fw_calls
+
+            // Improved Close Range Depth - D555 only, USB toggle gated on FW support.
+            if( d500_device::_fw_version >= firmware_version( "7.58.39807.10573" ) )
+            {
+                register_feature( std::make_shared< close_range_filter_feature >(
+                    dynamic_cast< d500_depth_sensor & >( depth_sensor ),
+                    d500_device::get_raw_depth_sensor() ) );
+            }
         }
 
         std::shared_ptr<matcher> create_matcher(const frame_holder& frame) const override

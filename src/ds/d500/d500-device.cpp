@@ -18,7 +18,6 @@
 
 #include <src/ds/features/amplitude-factor-feature.h>
 #include <src/ds/features/auto-exposure-roi-feature.h>
-#include <src/ds/features/close-range-filter-feature.h>
 
 #include "proc/depth-formats-converter.h"
 #include "proc/y8i-to-y8y8.h"
@@ -713,12 +712,6 @@ namespace librealsense
         register_feature( std::make_shared< amplitude_factor_feature >() );
 
         register_feature( std::make_shared< auto_exposure_roi_feature >( get_depth_sensor(), _hw_monitor ) );
-
-        if( get_pid() == ds::D555_PID )
-        {
-            auto & depth_sensor = dynamic_cast< d500_depth_sensor & >( get_depth_sensor() );
-            register_feature( std::make_shared< close_range_filter_feature >( depth_sensor, get_raw_depth_sensor() ) );
-        }
     }
 
     platform::usb_spec d500_device::get_usb_spec() const
