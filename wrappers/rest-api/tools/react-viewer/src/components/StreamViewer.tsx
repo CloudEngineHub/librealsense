@@ -18,8 +18,8 @@ interface DeviceStream {
 export function StreamViewer() {
   const { deviceStates } = useAppStore()
   
-  // Collect all enabled streams from all active devices
-  const allEnabledStreams = useMemo(() => {
+  // Collect all enabled streams from all active devices; hide tiles until they actually stream.
+  const activeStreams = useMemo(() => {
     const streams: DeviceStream[] = []
     
     Object.values(deviceStates).forEach((ds: DeviceState) => {
@@ -40,12 +40,14 @@ export function StreamViewer() {
                           activeTypes.some(st => st.toLowerCase() === config.stream_type.toLowerCase())
         }
         
+        if (!streamIsActive) return
+
         streams.push({
           deviceId: ds.device.device_id,
           deviceName: ds.device.name,
           serialNumber: ds.device.serial_number,
           config,
-          isStreaming: streamIsActive,
+          isStreaming: streamIsActive,  // always true here; guard above ensures that
           metadata: ds.streamMetadata[config.stream_type],
         })
       })
@@ -58,7 +60,7 @@ export function StreamViewer() {
 
   return (
     <div className="h-full">
-      {allEnabledStreams.length === 0 ? (
+      {activeStreams.length === 0 ? (
         <div className="h-full flex items-center justify-center text-gray-500">
           <div className="text-center">
             <svg
@@ -74,23 +76,19 @@ export function StreamViewer() {
                 d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
               />
             </svg>
-            <p className="text-lg">No Streams Enabled</p>
-            <p className="text-sm mt-1">
-              {activeDeviceCount === 0 
-                ? 'Activate a device and enable streams to start viewing'
-                : 'Enable streams in the right panel to start viewing'}
-            </p>
+            <p className="text-lg">Nothing is streaming!</p>
+            <p className="text-sm mt-1">Connect a device and enable any stream to start</p>
           </div>
         </div>
       ) : (
         <div
           className="h-full grid gap-2"
           style={{
-            gridTemplateColumns: `repeat(${Math.min(allEnabledStreams.length, 2)}, 1fr)`,
-            gridTemplateRows: `repeat(${Math.ceil(allEnabledStreams.length / 2)}, 1fr)`,
+            gridTemplateColumns: `repeat(${Math.min(activeStreams.length, 2)}, 1fr)`,
+            gridTemplateRows: `repeat(${Math.ceil(activeStreams.length / 2)}, 1fr)`,
           }}
         >
-          {allEnabledStreams.map((stream) => {
+          {activeStreams.map((stream) => {
             const isMotionStream = ['gyro', 'accel'].includes(stream.config.stream_type.toLowerCase())
             
             if (isMotionStream) {

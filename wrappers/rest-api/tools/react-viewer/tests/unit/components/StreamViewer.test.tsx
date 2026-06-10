@@ -5,27 +5,27 @@ import { StreamViewer } from '@/components/StreamViewer'
 
 describe('StreamViewer', () => {
   describe('Empty State', () => {
-    it('shows "No Streams Enabled" when no devices are active', () => {
+    it('shows "Nothing is streaming!" when no devices are active', () => {
       render(<StreamViewer />, {
         initialStoreState: {
           deviceStates: {},
         },
       })
-      
-      expect(screen.getByText('No Streams Enabled')).toBeInTheDocument()
+
+      expect(screen.getByText('Nothing is streaming!')).toBeInTheDocument()
     })
 
-    it('shows message to activate device when no devices are active', () => {
+    it('shows the "connect + enable" hint when no devices are active', () => {
       render(<StreamViewer />, {
         initialStoreState: {
           deviceStates: {},
         },
       })
-      
-      expect(screen.getByText(/Activate a device and enable streams/)).toBeInTheDocument()
+
+      expect(screen.getByText('Connect a device and enable any stream to start')).toBeInTheDocument()
     })
 
-    it('shows message to enable streams when device is active but no streams enabled', () => {
+    it('shows the same empty state when device is active but no streams enabled', () => {
       const device = createMockDevice()
       const deviceState = createMockDeviceState(device, {
         isActive: true,
@@ -34,14 +34,14 @@ describe('StreamViewer', () => {
         // the stream enabled and the empty-state branch never renders.
         streamConfigs: [createMockStreamConfig({ enable: false })],
       })
-      
+
       render(<StreamViewer />, {
         initialStoreState: {
           deviceStates: { [device.device_id]: deviceState },
         },
       })
-      
-      expect(screen.getByText(/Enable streams in the right panel/)).toBeInTheDocument()
+
+      expect(screen.getByText('Nothing is streaming!')).toBeInTheDocument()
     })
   })
 
@@ -160,7 +160,7 @@ describe('StreamViewer', () => {
     it('displays differently when streaming vs not streaming', () => {
       const device = createMockDevice()
       const config = createMockStreamConfig({ enable: true })
-      
+
       // Not streaming
       const notStreamingState = createMockDeviceState(device, {
         isActive: true,
@@ -168,15 +168,36 @@ describe('StreamViewer', () => {
         streamingMode: 'idle',
         streamConfigs: [config],
       })
-      
+
       const { rerender } = render(<StreamViewer />, {
         initialStoreState: {
           deviceStates: { [device.device_id]: notStreamingState },
         },
       })
-      
+
       // Stream tile should be present even when not actively streaming
       expect(screen.queryByText('No Streams Enabled')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('Tile hiding until streaming', () => {
+    it('hides tile when stream is enabled but not actively streaming', () => {
+      const device = createMockDevice()
+      const config = createMockStreamConfig({ stream_type: 'depth', enable: true })
+      const deviceState = createMockDeviceState(device, {
+        isActive: true,
+        isStreaming: false,
+        streamingMode: 'pipeline',
+        streamConfigs: [config],
+      })
+
+      render(<StreamViewer />, {
+        initialStoreState: {
+          deviceStates: { [device.device_id]: deviceState },
+        },
+      })
+
+      expect(screen.getByText('Nothing is streaming!')).toBeInTheDocument()
     })
   })
 
