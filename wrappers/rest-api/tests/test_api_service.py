@@ -577,7 +577,8 @@ class TestRealSenseAPI:
         assert response.status_code == 500
         detail = response.json()["detail"]
         assert "error code" in detail.lower()
-        assert "0x00000009" in detail
+        assert "0x00000009" in detail  # returned error code
+        assert "0x000000A6" in detail  # expected opcode echo
 
     def test_hwm_response_too_short(self, setup_mock_managers):
         """When the firmware response is shorter than 4 bytes the endpoint returns 500."""

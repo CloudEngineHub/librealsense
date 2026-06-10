@@ -3,6 +3,7 @@
 
 import asyncio
 import platform
+import struct
 import threading
 import time
 import logging
@@ -2767,26 +2768,28 @@ class RealSenseManager:
             cmd = debug.build_command(opcode, param1, param2, param3, param4, payload)
             raw_response = debug.send_and_receive_raw_data(cmd)
             response_bytes = list(raw_response)
+
+            # The raw response starts with a 4-byte little-endian uint32 that echoes
+            # the sent opcode on success or contains a firmware error code on failure.
+            # send_and_receive_raw_data does not raise on firmware-level errors, so we
+            # must inspect the opcode ourselves.
+            if len(response_bytes) < 4:
+                raise RealSenseError(
+                    status_code=500, detail="HWM command failed: response too short"
+                )
+            response_opcode, = struct.unpack_from('<I', bytes(response_bytes[:4]))
+            if response_opcode != opcode:
+                raise RealSenseError(
+                    status_code=500,
+                    detail=f"HWM command failed: firmware returned error code 0x{response_opcode:08X} (expected opcode echo 0x{opcode:08X})",
+                )
+            return response_bytes
+        except RealSenseError:
+            raise
         except Exception as e:
             raise RealSenseError(
                 status_code=500, detail=f"HWM command failed: {e}"
             )
-
-        # The raw response starts with a 4-byte little-endian uint32 that echoes
-        # the sent opcode on success or contains a firmware error code on failure.
-        # send_and_receive_raw_data does not raise on firmware-level errors, so we
-        # must inspect the opcode ourselves.
-        if len(response_bytes) < 4:
-            raise RealSenseError(
-                status_code=500, detail="HWM command failed: response too short"
-            )
-        response_opcode = int.from_bytes(bytes(response_bytes[:4]), "little")
-        if response_opcode != opcode:
-            raise RealSenseError(
-                status_code=500,
-                detail=f"HWM command failed: firmware returned error code 0x{response_opcode:08X}",
-            )
-        return response_bytes
 
     def get_sensor_metadata(
         self,
