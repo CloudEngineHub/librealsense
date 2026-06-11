@@ -545,8 +545,8 @@ class TestRealSenseAPI:
         from .pyrealsense_mock import device as MockDevice
         rs_manager = setup_mock_managers["rs_manager"]
 
-        # Inject a device that does NOT support debug_protocol
-        no_debug_device = MockDevice(serial_number="no-debug", name="Limited Device", supports_debug=False)
+        # Plain device (not a debug_protocol subclass) does not expose the extension.
+        no_debug_device = MockDevice(serial_number="no-debug", name="Limited Device")
         rs_manager.devices["no-debug"] = no_debug_device
 
         response = client.post(
@@ -558,14 +558,13 @@ class TestRealSenseAPI:
 
     def test_hwm_firmware_error(self, setup_mock_managers):
         """When firmware echoes back a non-matching opcode the endpoint returns 500."""
-        from .pyrealsense_mock import device as MockDevice
+        from .pyrealsense_mock import debug_protocol as MockDebugDevice
         rs_manager = setup_mock_managers["rs_manager"]
 
         # fw_error_code differs from opcode 0xA6 so the opcode check must fire.
-        error_device = MockDevice(
+        error_device = MockDebugDevice(
             serial_number="fw-error",
             name="Error Device",
-            supports_debug=True,
             fw_error_code=0x00000009,
         )
         rs_manager.devices["fw-error"] = error_device
@@ -582,13 +581,12 @@ class TestRealSenseAPI:
 
     def test_hwm_response_too_short(self, setup_mock_managers):
         """When the firmware response is shorter than 4 bytes the endpoint returns 500."""
-        from .pyrealsense_mock import device as MockDevice
+        from .pyrealsense_mock import debug_protocol as MockDebugDevice
         rs_manager = setup_mock_managers["rs_manager"]
 
-        short_device = MockDevice(
+        short_device = MockDebugDevice(
             serial_number="short-resp",
             name="Short Response Device",
-            supports_debug=True,
             short_hwm_response=True,
         )
         rs_manager.devices["short-resp"] = short_device
