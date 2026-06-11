@@ -187,7 +187,7 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
     };
 
 
-    class rs_d585_demo_device // Used for demo to customers. D585S without the safety.
+    class rs_d585_legacy_device // Used for demo to customers. D585S without the safety.
         : public d500_active
         , public d500_color
         , public d500_motion
@@ -195,7 +195,7 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
         , public extended_firmware_logger_device
     {
     public:
-        rs_d585_demo_device( std::shared_ptr< const d500_info > const & dev_info )
+        rs_d585_legacy_device( std::shared_ptr< const d500_info > const & dev_info )
             : device( dev_info )
             , backend_device( dev_info )
             , d500_device( dev_info )
@@ -375,8 +375,8 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
             {
             case ds::D555_PID:
                 return std::make_shared< d555_device >( dev_info );
-            case ds::D585_DEMO_PID:
-                return std::make_shared< rs_d585_demo_device >( dev_info );
+            case ds::D585_LEGACY_PID:
+                return std::make_shared< rs_d585_legacy_device >( dev_info );
             case ds::D585S_PID:
                 return std::make_shared< rs_d585s_device >( dev_info );
             case ds::D535_2C_PID:

@@ -18,7 +18,7 @@ namespace librealsense
         const uint16_t D555_PID           = 0x0B56;
         const uint16_t D555_RECOVERY_PID  = 0x0ADE;
         const uint16_t D585S_RECOVERY_PID = 0x0ADD;
-        const uint16_t D585_DEMO_PID      = 0x0B6A; // D585S without the safety. Used to demo capabilities to customers.
+        const uint16_t D585_LEGACY_PID    = 0x0B6A; // D585S without the safety. Used to demo capabilities to customers.
         const uint16_t D585S_PID          = 0x0B6B; // D585S, S for safety
         // devices under RealSense VID
         const uint16_t D500_RECOVERY_PID      = 0x0CFD; // Shared across the D500 family
@@ -40,7 +40,7 @@ namespace librealsense
         // d500 Devices supported by the current version
         static const std::set<std::uint16_t> rs500_sku_pid = {
             D555_PID,
-            D585_DEMO_PID,
+            D585_LEGACY_PID,
             D585S_PID,
             D535_2C_PID,
             D535_3C_PID,
@@ -53,24 +53,26 @@ namespace librealsense
         };
 
         static const std::map< std::uint16_t, std::string > rs500_sku_names = {
-            { D555_PID,           "Intel RealSense D555" },
-            { D555_RECOVERY_PID,  "Intel RealSense D555 Recovery" },
-            { D585_DEMO_PID,      "Intel RealSense D585" },
-            { D585S_PID,          "Intel RealSense D585S" },
-            { D585S_RECOVERY_PID, "Intel RealSense D585S Recovery"},
-            { D535_2C_PID,        "RealSense D535 Dual RGB" },
-            { D535_3C_PID,        "RealSense D535" },
-            { D535F_PID,          "RealSense D535F" },
-            { D585_2C_PID,        "RealSense D585 Dual RGB" },
-            { D585_3C_PID,        "RealSense D585" },
-            { D585F_PID,          "RealSense D585F" },
-            { D585_2C_PROTO_PID,  "RealSense D585 Proto Dual RGB" },
-            { D585_3C_PROTO_PID,  "RealSense D585 Prototype" }
+            { D555_PID,               "Intel RealSense D555" },
+            { D555_RECOVERY_PID,      "Intel RealSense D555 Recovery" },
+            { D585_LEGACY_PID,        "Intel RealSense D585" },
+            { D585S_PID,              "Intel RealSense D585S" },
+            { D585S_RECOVERY_PID,     "Intel RealSense D585S Recovery"},
+            { D500_RECOVERY_PID,      "RealSense D500 Recovery"},
+            { D500_USB2_RECOVERY_PID, "RealSense D500 Recovery"},
+            { D535_2C_PID,            "RealSense D535 Dual RGB" },
+            { D535_3C_PID,            "RealSense D535" },
+            { D535F_PID,              "RealSense D535F" },
+            { D585_2C_PID,            "RealSense D585 Dual RGB" },
+            { D585_3C_PID,            "RealSense D585" },
+            { D585F_PID,              "RealSense D585F" },
+            { D585_2C_PROTO_PID,      "RealSense D585 Proto Dual RGB" },
+            { D585_3C_PROTO_PID,      "RealSense D585 Prototype" }
         };
 
         //TODO
         //static std::map<uint16_t, std::string> d500_device_to_fw_min_version = {
-        //    {D585_DEMO_PID, "0.0.0.0"},
+        //    {D585_LEGACY_PID, "0.0.0.0"},
         //    {D585S_PID, "0.0.0.0"},
         //    {D585S_RECOVERY_PID , "0.0.0.0"}
         //};
