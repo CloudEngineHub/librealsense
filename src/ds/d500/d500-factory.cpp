@@ -384,7 +384,9 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
             case ds::D585_2C_PROTO_PID:
                 return std::make_shared< rs_d5x5_device >( dev_info );
             case ds::D535_3C_PID:
+            case ds::D535F_PID:
             case ds::D585_3C_PID:
+            case ds::D585F_PID:
             case ds::D585_3C_PROTO_PID:
                 return std::make_shared< rs_d5x5_color_device >( dev_info );
             default:

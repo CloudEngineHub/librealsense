@@ -229,27 +229,11 @@ namespace librealsense
             }
             auto&& vid_profile = dynamic_cast<video_stream_profile_interface*>(p.get());
 
-            // used when color stream comes from depth sensor (as in D405)
-            if (p->get_stream_type() == RS2_STREAM_COLOR)
-            {
-                const auto&& profile = to_profile(p.get());
-                std::weak_ptr<d500_depth_sensor> wp =
-                    std::dynamic_pointer_cast<d500_depth_sensor>(this->shared_from_this());
-                vid_profile->set_intrinsics([profile, wp]()
-                    {
-                        auto sp = wp.lock();
-                        if (sp)
-                            return sp->get_color_intrinsics(profile);
-                        else
-                            return rs2_intrinsics{};
-                    });
-            }
             // Register intrinsics
-            else if (p->get_format() != RS2_FORMAT_Y16) // Y16 format indicate unrectified images, no intrinsics are available for these
+            if (p->get_format() != RS2_FORMAT_Y16) // Y16 format indicate unrectified images, no intrinsics are available for these
             {
                 const auto&& profile = to_profile(p.get());
-                std::weak_ptr<d500_depth_sensor> wp =
-                    std::dynamic_pointer_cast<d500_depth_sensor>(this->shared_from_this());
+                std::weak_ptr<d500_depth_sensor> wp = std::dynamic_pointer_cast<d500_depth_sensor>(this->shared_from_this());
                 vid_profile->set_intrinsics([profile, wp]()
                 {
                     auto sp = wp.lock();
