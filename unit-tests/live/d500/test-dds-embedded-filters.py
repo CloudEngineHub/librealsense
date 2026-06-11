@@ -62,8 +62,8 @@ if test_decimation_filter:
 
         decimation_options = decimation_embedded_filter.get_supported_options()
         test.check_equal(len(decimation_options), 2)
-        check_option_in_list(rs.option.embedded_filter_enabled, decimation_options)
-        check_option_in_list(rs.option.filter_magnitude, decimation_options)
+        test.check(check_option_in_list(rs.option.embedded_filter_enabled, decimation_options))
+        test.check(check_option_in_list(rs.option.filter_magnitude, decimation_options))
 
     with test.closure("Decimation embedded filter set/get options"):
         set_get_filter_option_value(decimation_embedded_filter, rs.option.embedded_filter_enabled, 1.0)
@@ -71,12 +71,14 @@ if test_decimation_filter:
         test.check_equal(decimation_embedded_filter.get_option(rs.option.filter_magnitude), 2.0)
 
     def decimation_check_callback(frame):
+        # Only stop waiting once we've actually checked a frame carrying the embedded_filters
+        # metadata - otherwise an early frame with no metadata could silently pass the test.
         global waiting_for_test, decimation_enabled
         if frame.supports_frame_metadata(rs.frame_metadata_value.embedded_filters):
             md_val = frame.get_frame_metadata(rs.frame_metadata_value.embedded_filters)
             value_to_check = 1 if decimation_enabled else 0
             test.check_equal(md_val & 1, value_to_check)
-        waiting_for_test = False
+            waiting_for_test = False
 
     def stream_and_check_decimation_filter():
         global waiting_for_test
@@ -122,10 +124,10 @@ if test_temporal_filter:
 
         temporal_options = temporal_embedded_filter.get_supported_options()
         test.check_equal(len(temporal_options), 4)
-        check_option_in_list(rs.option.embedded_filter_enabled, temporal_options)
-        check_option_in_list(rs.option.filter_smooth_alpha, temporal_options)
-        check_option_in_list(rs.option.filter_smooth_delta, temporal_options)
-        check_option_in_list(rs.option.holes_fill, temporal_options)
+        test.check(check_option_in_list(rs.option.embedded_filter_enabled, temporal_options))
+        test.check(check_option_in_list(rs.option.filter_smooth_alpha, temporal_options))
+        test.check(check_option_in_list(rs.option.filter_smooth_delta, temporal_options))
+        test.check(check_option_in_list(rs.option.holes_fill, temporal_options))
 
     with test.closure("Temporal embedded filter set/get options"):
         set_get_filter_option_value(temporal_embedded_filter, rs.option.embedded_filter_enabled, 1.0)
@@ -135,12 +137,14 @@ if test_temporal_filter:
 
 
     def temporal_check_callback(frame):
+        # Only stop waiting once we've actually checked a frame carrying the embedded_filters
+        # metadata - otherwise an early frame with no metadata could silently pass the test.
         global waiting_for_test, temporal_enabled
         if frame.supports_frame_metadata(rs.frame_metadata_value.embedded_filters):
             md_val = frame.get_frame_metadata(rs.frame_metadata_value.embedded_filters)
             value_to_check = 1 if temporal_enabled else 0
             test.check_equal(md_val & 0b100, value_to_check)
-        waiting_for_test = False
+            waiting_for_test = False
 
 
     def stream_and_check_temporal_filter():
