@@ -7,6 +7,7 @@ from pytest_check import check
 import numpy as np
 import cv2
 import logging
+import re
 from iq_helper import find_roi_location, get_roi_from_frame, is_color_close, save_failure_snapshot, WIDTH, HEIGHT
 
 log = logging.getLogger(__name__)
@@ -171,6 +172,16 @@ def test_basic_color(test_device, test_context_var):
             ((1280,720), 10),
             ((1280,720), 15),
         ]
+
+    # D436 color stream returns near-black frames at >30 fps with Auto-Exposure ON
+    # (reproduced on FW 5.17.3.10 and 5.17.3.21, and in realsense-viewer).
+    # Restrict to <=30 fps until the FW issue is fixed.
+    product_name = dev.get_info(rs.camera_info.name)
+    if re.search(r'\bD436\b', product_name):
+        skipped = [c for c in configurations if c[1] > 30]
+        if skipped:
+            log.warning(f"D436 FW color-stream bug: skipping color configs fps>30: {skipped}")
+        configurations = [c for c in configurations if c[1] <= 30]
 
     for resolution, fps in configurations:
         run_test(dev, ctx, resolution, fps)

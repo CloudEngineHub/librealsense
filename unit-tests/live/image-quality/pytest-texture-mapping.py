@@ -14,6 +14,7 @@ from pytest_check import check
 import numpy as np
 import cv2
 import logging
+import re
 from iq_helper import (find_roi_location, get_roi_from_frame, is_color_close,
                        get_median_depth_from_region, sample_bg_depth,
                        get_median_color_from_region, sample_bg_color,
@@ -263,8 +264,20 @@ def test_texture_mapping(test_device, test_context_var):
             ((1280, 720), 15),
         ]
 
+    # D436 color stream returns near-black frames at >30 fps with Auto-Exposure ON
+    # (reproduced on FW 5.17.3.10 and 5.17.3.21, and in realsense-viewer).
+    # The FW issue is on the color stream only -- filter just the color dimension
+    # so the depth-only combinations are still exercised in weekly.
+    product_name = dev.get_info(rs.camera_info.name)
+    color_configurations = configurations
+    if re.search(r'\bD436\b', product_name):
+        skipped = [c for c in configurations if c[1] > 30]
+        if skipped:
+            log.warning(f"D436 FW color-stream bug: skipping color configs fps>30: {skipped}")
+        color_configurations = [c for c in configurations if c[1] <= 30]
+
     for (depth_resolution, depth_fps) in configurations:
-        for (color_resolution, color_fps) in configurations:
+        for (color_resolution, color_fps) in color_configurations:
             if "weekly" not in test_context_var:
                 # in nightly we test only matching resolutions and fps
                 if depth_resolution != color_resolution or depth_fps != color_fps:
