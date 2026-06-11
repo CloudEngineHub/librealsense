@@ -106,11 +106,10 @@ class context:
 
 # Mock for rs.device class
 class device:
-    def __init__(self, serial_number="1234", name="Test Device", supports_debug=True):
+    def __init__(self, serial_number="1234", name="Test Device"):
         self.serial = serial_number
         self.name = name
         self.sensors = []
-        self._supports_debug = supports_debug
         self._info = {
             camera_info.serial_number: serial_number,
             camera_info.name: name,
@@ -130,16 +129,15 @@ class device:
 
     def is_debug_protocol(self):
         """Return True if this device exposes the RS2_EXTENSION_DEBUG extension."""
-        return self._supports_debug
+        return isinstance(self, debug_protocol)
 
     def as_debug_protocol(self):
-        """Return a debug_protocol handle for hardware monitor commands.
+        """Return self when the device supports the debug_protocol extension.
 
-        Callers should check is_debug_protocol() first; this mirrors the real
-        SDK behaviour where as_debug_protocol() returns an empty handle (not an
-        exception) when the extension is unsupported.
+        Mirrors the SDK model where debug_protocol IS-A device — callers must
+        check is_debug_protocol() first.
         """
-        return debug_protocol(self)
+        return self if isinstance(self, debug_protocol) else None
 
 # Mock for sensor base class
 class sensor:
@@ -623,17 +621,28 @@ class disparity_transform:
         return frame
 
 # Mock for debug_protocol (hardware monitor)
-class debug_protocol:
+class debug_protocol(device):
     """Mock for the pyrealsense2 debug_protocol extension.
 
-    build_command packs the opcode + 4 params into a 20-byte little-endian
-    header and appends any caller-supplied data bytes.  send_and_receive_raw_data
-    echoes back a minimal 4-byte OK response so the service layer can round-trip
-    without touching real hardware.
+    Inherits from device so it can be injected directly into rs_manager.devices
+    and is_debug_protocol() returns True via isinstance check, mirroring the SDK
+    extension model where debug_protocol IS-A device.
+
+    build_command packs the opcode + 4 params into a little-endian header and
+    appends any caller-supplied data bytes.
+
+    send_and_receive_raw_data mirrors the real SDK raw path: on success it echoes
+    the sent opcode back in the first 4 bytes of the response (little-endian
+    uint32).  Pass fw_error_code to simulate a firmware error (the response opcode
+    will differ from the sent opcode), or short_hwm_response=True to simulate a
+    truncated response.
     """
 
-    def __init__(self, dev):
-        self._device = dev
+    def __init__(self, serial_number="1234", name="Test Device",
+                 fw_error_code=None, short_hwm_response=False):
+        super().__init__(serial_number=serial_number, name=name)
+        self._fw_error_code = fw_error_code
+        self._short_response = short_hwm_response
 
     def build_command(self, opcode, param1=0, param2=0, param3=0, param4=0, data=None):
         import struct
@@ -641,8 +650,14 @@ class debug_protocol:
         return list(header) + list(data or [])
 
     def send_and_receive_raw_data(self, input_data):
-        # Return a 4-byte little-endian 0 to signal STATUS_OK.
-        return [0, 0, 0, 0]
+        import struct
+        if self._short_response:
+            return [0x00]
+        if self._fw_error_code is not None:
+            return list(struct.pack("<I", self._fw_error_code))
+        # Success: echo back the opcode from bytes [0-3] of the command buffer.
+        opcode = int.from_bytes(bytes(input_data[:4]), "little")
+        return list(struct.pack("<I", opcode))
 
 
 # Mock exception types
@@ -666,7 +681,7 @@ def create_mock_device(serial_number, name, with_depth=True, with_color=True, wi
     """
     Create a mock device with the specified sensors
     """
-    mock_device = device(serial_number, name)
+    mock_device = debug_protocol(serial_number, name)
 
     if with_depth:
         depth_sensor_obj = depth_sensor("Depth Sensor")
