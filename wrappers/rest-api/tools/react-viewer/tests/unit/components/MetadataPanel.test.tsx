@@ -76,24 +76,9 @@ describe('MetadataOverlay', () => {
 })
 
 describe('MetadataPanel', () => {
-  it('renders nothing when not streaming', () => {
-    const { container } = render(
-      <MetadataPanel
-        isStreaming={false}
-        metadata={baseMetadata}
-        streamType="depth"
-        fps={30}
-        show={false}
-        onToggle={() => {}}
-      />,
-    )
-    expect(container).toBeEmptyDOMElement()
-  })
-
   it('renders nothing when no metadata at all', () => {
     const { container } = render(
       <MetadataPanel
-        isStreaming={true}
         metadata={undefined}
         streamType="depth"
         fps={30}
@@ -114,7 +99,6 @@ describe('MetadataPanel', () => {
     }
     render(
       <MetadataPanel
-        isStreaming={true}
         metadata={md}
         streamType="depth"
         fps={30}
@@ -128,7 +112,6 @@ describe('MetadataPanel', () => {
   it('shows "Metadata" label when closed', () => {
     render(
       <MetadataPanel
-        isStreaming={true}
         metadata={baseMetadata}
         streamType="depth"
         fps={30}
@@ -142,7 +125,6 @@ describe('MetadataPanel', () => {
   it('shows "✕" label when open and renders overlay', () => {
     render(
       <MetadataPanel
-        isStreaming={true}
         metadata={baseMetadata}
         streamType="depth"
         fps={30}
@@ -158,7 +140,6 @@ describe('MetadataPanel', () => {
     const onToggle = vi.fn()
     render(
       <MetadataPanel
-        isStreaming={true}
         metadata={baseMetadata}
         streamType="depth"
         fps={30}
