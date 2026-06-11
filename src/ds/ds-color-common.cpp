@@ -71,7 +71,6 @@ namespace librealsense
         _color_ep.register_pu(RS2_OPTION_SHARPNESS);
 
         auto white_balance_option = std::make_shared<uvc_pu_option>(_raw_color_ep, RS2_OPTION_WHITE_BALANCE);
-        _color_ep.register_option(RS2_OPTION_WHITE_BALANCE, white_balance_option);
         auto auto_white_balance_option = std::make_shared<uvc_pu_option>(_raw_color_ep, RS2_OPTION_ENABLE_AUTO_WHITE_BALANCE);
         _color_ep.register_option(RS2_OPTION_ENABLE_AUTO_WHITE_BALANCE, auto_white_balance_option);
         _color_ep.register_option(RS2_OPTION_WHITE_BALANCE,
