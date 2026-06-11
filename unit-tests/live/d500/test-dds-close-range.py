@@ -137,9 +137,9 @@ if test_close_range_filter:
         close_range_filter.set_option(rs.option.embedded_filter_enabled, 0.0)
         test.check_equal(close_range_filter.get_option(rs.option.embedded_filter_enabled), 0.0)
 
-    # Skipped due to known FW issue: the close-range bit (1 << 5) of the embedded_filters
-    # metadata is not set on depth frames even when the filter is enabled. Re-enable once
-    # the FW fix is available.
+    # Skipped due to known FW issue [RSDEV-12008]: the close-range bit (1 << 5) of the
+    # embedded_filters metadata is not set on depth frames even when the filter is enabled.
+    # Re-enable once the FW fix is available.
     SKIP_METADATA_BIT_TEST_FW_ISSUE = True
 
     if not SKIP_METADATA_BIT_TEST_FW_ISSUE:
