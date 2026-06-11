@@ -137,16 +137,25 @@ if test_close_range_filter:
         close_range_filter.set_option(rs.option.embedded_filter_enabled, 0.0)
         test.check_equal(close_range_filter.get_option(rs.option.embedded_filter_enabled), 0.0)
 
-    with test.closure("Improved Close Range Depth embedded filter metadata member"):
-        disable_close_range_filter()
-        close_range_enabled = False
-        stream_and_check_close_range_filter()
-        time.sleep(1)
-        enable_close_range_filter()
-        close_range_enabled = True
-        stream_and_check_close_range_filter()
-        time.sleep(1)
-        disable_close_range_filter()
+    # Skipped due to known FW issue [RSDEV-12008]: the close-range bit (1 << 5) of the
+    # embedded_filters metadata is not set on depth frames even when the filter is enabled.
+    # Re-enable once the FW fix is available.
+    SKIP_METADATA_BIT_TEST_FW_ISSUE = True
+
+    if not SKIP_METADATA_BIT_TEST_FW_ISSUE:
+        with test.closure("Improved Close Range Depth embedded filter metadata member"):
+            disable_close_range_filter()
+            close_range_enabled = False
+            stream_and_check_close_range_filter()
+            time.sleep(1)
+            enable_close_range_filter()
+            close_range_enabled = True
+            stream_and_check_close_range_filter()
+            time.sleep(1)
+            disable_close_range_filter()
+    else:
+        log.w("Skipping 'Improved Close Range Depth embedded filter metadata member' "
+              "- known FW issue (metadata bit not set)")
 else:
     print("Improved Close Range Depth Embedded Filter not tested")
 
