@@ -5,20 +5,17 @@
 
 #include <src/feature-interface.h>
 
-#include <memory>
-
 
 namespace librealsense {
 
 class d500_depth_sensor;
-class uvc_sensor;
 
 class close_range_filter_feature : public feature_interface
 {
 public:
     static const feature_id ID;
 
-    close_range_filter_feature( d500_depth_sensor & depth_sensor, std::shared_ptr< uvc_sensor > const & raw_depth_ep );
+    explicit close_range_filter_feature( d500_depth_sensor & depth_sensor );
 
     feature_id get_id() const override;
 };

@@ -167,8 +167,7 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
             if( d500_device::_fw_version >= firmware_version( "7.58.39807.10574" ) )
             {
                 register_feature( std::make_shared< close_range_filter_feature >(
-                    dynamic_cast< d500_depth_sensor & >( get_depth_sensor() ),
-                    d500_device::get_raw_depth_sensor() ) );
+                    dynamic_cast< d500_depth_sensor & >( get_depth_sensor() ) ) );
             }
         }
 
@@ -346,8 +345,7 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
             if( d500_device::_fw_version >= firmware_version( "7.58.39807.10573" ) )
             {
                 register_feature( std::make_shared< close_range_filter_feature >(
-                    dynamic_cast< d500_depth_sensor & >( depth_sensor ),
-                    d500_device::get_raw_depth_sensor() ) );
+                    dynamic_cast< d500_depth_sensor & >( depth_sensor ) ) );
             }
         }
 
