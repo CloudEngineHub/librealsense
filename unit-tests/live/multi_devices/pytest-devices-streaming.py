@@ -346,6 +346,7 @@ def test_multi_stream_operation(test_devices, request):
             pytest.fail(f"At least 2 non-color streams needed for phase 1, but found {len(no_color_configs)}")
 
         run_phase("PHASE 1 (no color)", device_list, no_color_configs)
-        run_phase("PHASE 2 (with color)", device_list, all_stream_configs)
+        #run_phase("PHASE 2 (with color)", device_list, all_stream_configs)
+        log.warning("PHASE 2 (with color) skipped until the hardware issue is understood and solved")
     finally:
         rs.reset_logger()
