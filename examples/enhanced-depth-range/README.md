@@ -60,6 +60,8 @@ Everything installs to `/opt/librealsense2-enhanced-depth/`. No venv needed — 
 The deb depends on `librealsense2` (≥ matching version) — install both from the
 same Artifactory / apt source so the SONAMEs line up.
 
+> Stay tuned: Details about how to get the package will be shared soon.
+
 ---
 
 ## RealSense Viewer: Improved Close Range Depth Post-Processing Filter
