@@ -20,6 +20,8 @@
 
 #include <rsutils/lazy.h>
 
+#include <src/embedded-filter-interface.h>
+
 
 namespace librealsense
 {
@@ -46,10 +48,16 @@ namespace librealsense
         float get_stereo_baseline_mm() const override;
         float get_preset_max_value() const override;
 
+        embedded_filters get_supported_embedded_filters() const override { return _embedded_filters; }
+        void add_embedded_filter( std::shared_ptr< embedded_filter_interface > filter ) { _embedded_filters.push_back( filter ); }
+
     protected:
         const d500_device * _owner;
         mutable std::atomic< float > _depth_units;
         float _stereo_baseline_mm;
+
+    private:
+        embedded_filters _embedded_filters;
     };
 
     class ds_thermal_monitor;
