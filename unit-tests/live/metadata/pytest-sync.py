@@ -18,7 +18,8 @@ pytestmark = [
 # Test parameters
 TS_TOLERANCE_MS = 1.5  # Tolerance for timestamp differences in ms
 TS_TOLERANCE_MICROSEC = TS_TOLERANCE_MS * 1000
-SKIP_FRAMES_AFTER_DROP = 10  # Frames to skip after detecting drops
+SKIP_FRAMES_AFTER_DROP = 10  # Minimum frames to let the hardware settle after a drop
+MAX_FRAMES_AWAITING_RESYNC = 60  # After a drop, fail if the streams don't re-synchronize within this many frames
 
 CONFIGURATIONS = [
     ((640, 480), 15),
@@ -54,6 +55,18 @@ def detect_frame_drops(frames_dict, prev_frame_counters):
     return frame_drop_detected, current_frame_counters
 
 
+def is_frameset_synced(frames_dict):
+    """True if all streams' global timestamps are mutually within tolerance.
+
+    A temporally-coincident frameset means the streams have re-aligned, so it is safe to
+    resume the strict timestamp checks. This is what lets the test tolerate a transient frame
+    drop and resync (RSDEV-11482) instead of asserting on the phase-shifted sets the syncer
+    keeps emitting while one stream is still one frame-counter behind another.
+    """
+    timestamps = [frame.timestamp for frame in frames_dict.values()]
+    return max(timestamps) - min(timestamps) <= TS_TOLERANCE_MS
+
+
 def run_test(device, ctx, resolution, fps):
     """Run timestamp synchronization test for a specific resolution and FPS"""
     pipeline = rs.pipeline(ctx)
@@ -83,7 +96,8 @@ def run_test(device, ctx, resolution, fps):
     time.sleep(5)  # Longer stabilization to prevent initial frame drop issues
 
     prev_frame_counters = {'depth': None, 'ir1': None, 'ir2': None, 'color': None}
-    frames_to_skip = 0
+    recovering = False
+    frames_since_drop = 0
     consecutive_drops = 0
     unskipped_frames = 0
 
@@ -99,31 +113,37 @@ def run_test(device, ctx, resolution, fps):
                 log.error("One or more frames are missing")
                 continue
 
-            # Skip frames during recovery
-            if frames_to_skip > 0:
-                frames_to_skip -= 1
-                if frames_to_skip == 0:
-                    prev_frame_counters = {'depth': None, 'ir1': None, 'ir2': None, 'color': None}
-                continue
-
             # Check for frame drops
             frames_dict = {'depth': depth_frame, 'ir1': ir1_frame, 'ir2': ir2_frame, 'color': color_frame}
             frame_drop_detected, current_frame_counters = detect_frame_drops(frames_dict, prev_frame_counters)
-            unskipped_frames += 1
+            prev_frame_counters = current_frame_counters
 
-            # Handle frame drops
-            if frame_drop_detected and not frames_to_skip:
+            # A drop can leave the streams phase-shifted (one stream a frame-counter behind another),
+            # so the syncer keeps emitting framesets whose timestamps differ by ~one frame period.
+            # Enter recovery and don't run the strict checks until the streams re-synchronize.
+            if frame_drop_detected:
                 consecutive_drops += 1
                 assert consecutive_drops <= 20, \
                     f"Continuous frame drops detected ({consecutive_drops} consecutive). Hardware issue."
-
-                frames_to_skip = SKIP_FRAMES_AFTER_DROP
-                log.warning(f"Frame drop at frame {unskipped_frames}, skipping next {frames_to_skip} frames")
-                prev_frame_counters = current_frame_counters
+                recovering = True
+                frames_since_drop = 0
+                log.warning(f"Frame drop at frame {unskipped_frames}, waiting for streams to re-synchronize")
                 continue
 
-            prev_frame_counters = current_frame_counters
+            # During recovery, wait for a temporally-coincident frameset before resuming. This pegs
+            # recovery to actual re-synchronization rather than a fixed frame count, while still
+            # failing if the streams never re-align (a real, persistent desync).
+            if recovering:
+                frames_since_drop += 1
+                if frames_since_drop < SKIP_FRAMES_AFTER_DROP or not is_frameset_synced(frames_dict):
+                    assert frames_since_drop <= MAX_FRAMES_AWAITING_RESYNC, \
+                        f"Streams did not re-synchronize within {MAX_FRAMES_AWAITING_RESYNC} frames after a drop"
+                    continue
+                log.info(f"Streams re-synchronized {frames_since_drop} frames after the drop")
+                recovering = False
+
             consecutive_drops = 0
+            unskipped_frames += 1
 
             # Test timestamp synchronization
             log.debug(f"Global TS - Depth:#{current_frame_counters['depth']} {depth_frame.timestamp}, IR1:#{current_frame_counters['ir1']} {ir1_frame.timestamp}, "
