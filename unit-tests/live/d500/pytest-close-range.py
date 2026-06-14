@@ -25,8 +25,8 @@ pytestmark = [
 # DPP Filter Bitmask bit 5 = "Improved Close Range Depth merge applied"
 CLOSE_RANGE_METADATA_BIT = 1 << 5
 
-# Spec defaults
-ENABLE_DEFAULT     = 0.0
+# Spec defaults. Enable is forced ON at SDK level (close_range filter ctor sends SET_CUR(1)).
+ENABLE_DEFAULT     = 1.0
 RATIO_INDEX_DEFAULT = 1.0    # choices ["1","2","4"], default "2" -> index 1
 SHIFT_DEFAULT      = 0.0
 THRESHOLD_DEFAULT  = 550.0

@@ -21,7 +21,7 @@ public:
 
     void set( float value ) override;
     float query() const override;
-    option_range get_range() const override { return { 0.f, 1.f, 1.f, 0.f }; }
+    option_range get_range() const override { return { 0.f, 1.f, 1.f, 1.f }; }
     bool is_enabled() const override { return true; }
     const char * get_description() const override
     {
