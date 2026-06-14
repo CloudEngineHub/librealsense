@@ -21,11 +21,11 @@ Every PR description starts with an Overview (1–2 sentences stating the user-v
 
 Tracked on [RSDEV-1234]
 
-## Summary
-- <what changed and why>
-
 ## Why
 <bug, regression, or capability gap>
+
+## Summary
+- <what changed and why>
 
 ## Test plan
 - [ ] <unit/pytest entries, marker/context/iteration counts>
@@ -33,6 +33,7 @@ Tracked on [RSDEV-1234]
 ```
 
 Keep the Overview jargon-free. Put tables (behavior change, latency, benchmarks) in the body, never in the Overview.
+Be consice when describing changes. Use short sentences. e.g avoid listing multiple enum literals when describing added enum.
 
 ## Before Every Push — Description Audit
 
