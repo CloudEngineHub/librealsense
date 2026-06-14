@@ -30,7 +30,7 @@ private:
     static std::shared_ptr< matcher > create_DIC_matcher( std::vector< stream_interface * > const & profiles );
     static std::shared_ptr< matcher > create_DIC_C_matcher( std::vector< stream_interface * > const & profiles );
 
-    static std::shared_ptr< matcher > create_identity_matcher( std::vector< stream_interface * > const & profiles );
+    static std::shared_ptr< matcher > create_identity_matcher( stream_interface * profiles );
     static std::shared_ptr< matcher > create_frame_number_matcher( std::vector< stream_interface * > const & profiles );
     static std::shared_ptr< matcher > create_timestamp_matcher( std::vector< stream_interface * > const & profiles );
 
