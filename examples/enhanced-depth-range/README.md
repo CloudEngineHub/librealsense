@@ -60,6 +60,10 @@ Everything installs to `/opt/librealsense2-enhanced-depth/`. No venv needed — 
 The deb depends on `librealsense2` (≥ matching version) — install both from the
 same Artifactory / apt source so the SONAMEs line up.
 
+The Debian package will be uploaded to the RealSense Debian apt repository soon.
+See [Installing the packages](../../doc/distribution_linux.md#installing-the-packages)
+for instructions on how to install our Debians.
+
 ---
 
 ## RealSense Viewer: Improved Close Range Depth Post-Processing Filter
