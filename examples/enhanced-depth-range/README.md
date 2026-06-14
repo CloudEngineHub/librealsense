@@ -61,8 +61,7 @@ The deb depends on `librealsense2` (≥ matching version) — install both from 
 same Artifactory / apt source so the SONAMEs line up.
 
 > Note: The Debian package will be uploaded to the RealSense Debian apt repository soon.
-See [Installing the packages](../../doc/distribution_linux.md#installing-the-packages)
-for instructions on how to install our Debians.
+> Details about how to get the package will be shared soon.
 
 ---
 
