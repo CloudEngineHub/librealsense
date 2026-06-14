@@ -99,14 +99,14 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
 
 
     // D585 or D535, dual RGB variant. No dedicated color sensor.
-    class rs_d5x5_device
+    class rs5x5_device
         : public d500_active
         , public d500_motion
         , public ds_advanced_mode_base
         , public extended_firmware_logger_device
     {
     public:
-        rs_d5x5_device( std::shared_ptr< const d500_info > const & dev_info )
+        rs5x5_device( std::shared_ptr< const d500_info > const & dev_info )
             : device( dev_info )
             , backend_device( dev_info )
             , d500_device( dev_info )
@@ -142,7 +142,7 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
     };
 
     // D585 or D535 with dedicated color sensor. Can be with IR filter on lens or without.
-    class rs_d5x5_color_device
+    class rs5x5_dedicated_color_device
         : public d500_active
         , public d500_color
         , public d500_motion
@@ -150,7 +150,7 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
         , public extended_firmware_logger_device
     {
     public:
-        rs_d5x5_color_device( std::shared_ptr< const d500_info > const & dev_info )
+        rs5x5_dedicated_color_device( std::shared_ptr< const d500_info > const & dev_info )
             : device( dev_info )
             , backend_device( dev_info )
             , d500_device( dev_info )
@@ -187,7 +187,7 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
     };
 
 
-    class rs_d585_legacy_device // Used for demo to customers. D585S without the safety.
+    class rs585_legacy_device // Used for demo to customers. D585S without the safety.
         : public d500_active
         , public d500_color
         , public d500_motion
@@ -195,7 +195,7 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
         , public extended_firmware_logger_device
     {
     public:
-        rs_d585_legacy_device( std::shared_ptr< const d500_info > const & dev_info )
+        rs585_legacy_device( std::shared_ptr< const d500_info > const & dev_info )
             : device( dev_info )
             , backend_device( dev_info )
             , d500_device( dev_info )
@@ -231,7 +231,7 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
         };
     };
     
-    class rs_d585s_device
+    class rs585s_device
         : public d500_active
         , public d500_color
         , public d500_safety
@@ -241,7 +241,7 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
         , public extended_firmware_logger_device
     {
     public:
-        rs_d585s_device( std::shared_ptr< const d500_info > const & dev_info )
+        rs585s_device( std::shared_ptr< const d500_info > const & dev_info )
             : device( dev_info )
             , backend_device( dev_info )
             , d500_device( dev_info )
@@ -293,7 +293,7 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
         };
     };
     
-    class d555_device
+    class rs555_device
         : public d500_active
         , public d500_color
         , public d500_motion
@@ -302,7 +302,7 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
         , public eth_config_device
     {
     public:
-        d555_device( std::shared_ptr< const d500_info > dev_info )
+        rs555_device( std::shared_ptr< const d500_info > dev_info )
             : device( dev_info )
             , backend_device( dev_info )
             , d500_device( dev_info )
@@ -374,21 +374,21 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
             switch( pid )
             {
             case ds::D555_PID:
-                return std::make_shared< d555_device >( dev_info );
+                return std::make_shared< rs555_device >( dev_info );
             case ds::D585_LEGACY_PID:
-                return std::make_shared< rs_d585_legacy_device >( dev_info );
+                return std::make_shared< rs585_legacy_device >( dev_info );
             case ds::D585S_PID:
-                return std::make_shared< rs_d585s_device >( dev_info );
+                return std::make_shared< rs585s_device >( dev_info );
             case ds::D535_2C_PID:
             case ds::D585_2C_PID:
             case ds::D585_2C_PROTO_PID:
-                return std::make_shared< rs_d5x5_device >( dev_info );
+                return std::make_shared< rs5x5_device >( dev_info );
             case ds::D535_3C_PID:
             case ds::D535F_PID:
             case ds::D585_3C_PID:
             case ds::D585F_PID:
             case ds::D585_3C_PROTO_PID:
-                return std::make_shared< rs_d5x5_color_device >( dev_info );
+                return std::make_shared< rs5x5_dedicated_color_device >( dev_info );
             default:
                 throw std::runtime_error( rsutils::string::from() << "unsupported D500 PID 0x" << hexdump( pid ) );
             }
