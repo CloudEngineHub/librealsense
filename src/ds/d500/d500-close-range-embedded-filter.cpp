@@ -58,9 +58,6 @@ void close_range_xu_option::set( float value )
     if( ! ep )
         throw invalid_value_exception( "Close Range: depth sensor not alive for set" );
 
-    //if( ep->is_streaming() )
-    //    throw wrong_api_call_sequence_exception( "Close Range Enable is pre-stream only" );
-
     ep->invoke_powered(
         [this, value]( platform::uvc_device & dev )
         {
