@@ -60,8 +60,7 @@ Everything installs to `/opt/librealsense2-enhanced-depth/`. No venv needed — 
 The deb depends on `librealsense2` (≥ matching version) — install both from the
 same Artifactory / apt source so the SONAMEs line up.
 
-> Note: The Debian package will be uploaded to the RealSense Debian apt repository soon.
-> Details about how to get the package will be shared soon.
+> Stay tuned: Details about how to get the package will be shared soon.
 
 ---
 
