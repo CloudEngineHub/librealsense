@@ -158,6 +158,11 @@ def _find_depth_profile( depth_sensor ):
 
 @pytest.mark.parametrize( "enable_value, expected_bit", [( 0.0, 0 ), ( 1.0, CLOSE_RANGE_METADATA_BIT )] )
 def test_close_range_metadata_bit( test_device, enable_value, expected_bit ):
+    # FW does not yet populate the embedded_filters metadata key for the close-range bit, so
+    # frames arrive without it and the test times out. Restore once RSDEV-12008 is resolved.
+    log.warning( "Skipping test_close_range_metadata_bit due to FW bug - restore after RSDEV-12008 is solved" )
+    pytest.skip( "FW bug tracked by RSDEV-12008" )
+
     depth_sensor, embedded_filter = _get_close_range_filter( test_device )
     profile = _find_depth_profile( depth_sensor )
     if profile is None:
