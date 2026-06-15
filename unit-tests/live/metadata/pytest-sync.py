@@ -97,7 +97,12 @@ def run_test(device, ctx, resolution, fps):
             pytest.fail(f"Sensor {sensor.name} does not support global time option")
 
     pipeline.start(cfg)
-    time.sleep(5)  # Longer stabilization to prevent initial frame drop issues
+
+    # The pipeline aggregator only publishes a frameset once every enabled stream is present,
+    # so the first wait_for_frames() already returns a full set. Use it to confirm all streams
+    # are firing, then stabilize over live streaming rather than stream bring-up.
+    pipeline.wait_for_frames()
+    time.sleep(2)  # stabilization once all streams are firing
 
     prev_frame_counters = {'depth': None, 'ir1': None, 'ir2': None, 'color': None}
     recovering = False
