@@ -15,6 +15,8 @@
 #include "media/ros_factory.h"
 #include "core/motion-frame.h"
 #include <sstream>
+#include <iomanip>
+#include <limits>
 #include <src/core/sensor-interface.h>
 #include <src/core/device-interface.h>
 #include <src/core/depth-frame.h>
@@ -420,20 +422,26 @@ namespace librealsense
         {
             LOG_ERROR("Error trying to get intrinsc data for stream " << profile->get_stream_type() << ", " << profile->get_stream_index());
         }
+        // full round-trip precision; the default ostream precision truncates intrinsics
+        auto full_precision = []( float v ) {
+            std::ostringstream o;
+            o << std::setprecision( std::numeric_limits<float>::max_digits10 ) << v;
+            return o.str();
+        };
         std::string payload = rsutils::string::from()
             << "width=" << profile->get_width() << ";"
             << "height=" << profile->get_height() << ";"
-            << "fx=" << intrinsics.fx << ";"
-            << "ppx=" << intrinsics.ppx << ";"
-            << "fy=" << intrinsics.fy << ";"
-            << "ppy=" << intrinsics.ppy << ";"
+            << "fx=" << full_precision( intrinsics.fx ) << ";"
+            << "ppx=" << full_precision( intrinsics.ppx ) << ";"
+            << "fy=" << full_precision( intrinsics.fy ) << ";"
+            << "ppy=" << full_precision( intrinsics.ppy ) << ";"
             << "model=" << librealsense::get_string(intrinsics.model) << ";"
             << "coeffs=";
 
         auto num_coeffs = sizeof(intrinsics.coeffs) / sizeof(intrinsics.coeffs[0]);
         for (size_t i = 0; i < num_coeffs; ++i)
         {
-            payload += std::to_string(intrinsics.coeffs[i]);
+            payload += full_precision(intrinsics.coeffs[i]);
             if (i < (num_coeffs - 1))
                 payload += ",";
         }
