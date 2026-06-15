@@ -522,6 +522,9 @@ namespace librealsense
     {
         for (auto& sensor_snap : m_initial_device_description.get_sensors_snapshots())
         {
+            if (sensor_snap.get_sensor_index() != sid.sensor_index)
+                continue;
+
             for (auto& stream_profile : sensor_snap.get_stream_profiles())
             {
                 if (stream_profile->get_stream_type() != sid.stream_type ||
@@ -547,6 +550,16 @@ namespace librealsense
                 int height = vsp->get_height();
                 int bpp = get_image_bpp(vsp->get_format());
                 int stride = width * bpp / 8;
+                // derive bpp/stride from the recorded payload,
+                // else use the values computed above
+                auto data_size = static_cast<librealsense::frame*>(frame_ptr)->data.size();
+                auto pixels = static_cast<size_t>(width) * height;
+                if (pixels > 0 && data_size % pixels == 0)
+                {
+                    int bpp_bytes = static_cast<int>(data_size / pixels);
+                    bpp = bpp_bytes * 8;
+                    stride = width * bpp_bytes;
+                }
                 video_frame_ptr->assign(width, height, stride, bpp);
                 return;
             }
