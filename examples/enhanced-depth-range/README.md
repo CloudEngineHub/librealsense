@@ -145,11 +145,8 @@ Both expose `pkg-config` files, so the simplest one-line build is:
 ```bash
 g++ -std=c++17 range_depth.cpp \
     -I/opt/librealsense2-enhanced-depth/include \
-    -L/opt/librealsense2-enhanced-depth/lib \
-    -lrs_depth_range \
-    -Wl,-rpath,/opt/librealsense2-enhanced-depth/lib \
     $(pkg-config --cflags --libs realsense2) \
-    -o range_depth
+    -ldl -o range_depth
 
 ./range_depth
 ```
