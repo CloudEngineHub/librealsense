@@ -11,6 +11,7 @@ import time
 
 import pytest
 import pyrealsense2 as rs
+import pyrsutils as rsutils
 from pytest_check import check
 import logging
 log = logging.getLogger(__name__)
@@ -31,12 +32,31 @@ RATIO_INDEX_DEFAULT = 1.0    # choices ["1","2","4"], default "2" -> index 1
 SHIFT_DEFAULT      = 0.0
 THRESHOLD_DEFAULT  = 550.0
 
+# Minimum FW that registers the close-range feature on each device, mirroring
+# src/ds/d500/d500-factory.cpp. Below the gate the feature is not registered and
+# get_embedded_filter() throws rather than returning a falsy value, so we skip up front.
+MIN_FW_BY_DEVICE = {
+    "D555": "7.58.39807.10573",
+    "D585": "7.58.39807.10574",
+}
+
 # Pick a depth profile that the close-range merge actually exercises on D555/D585.
 DEPTH_W, DEPTH_H, DEPTH_FPS = 640, 360, 30
 
 
+def _skip_if_fw_below_minimum( dev ):
+    name = dev.get_info( rs.camera_info.name ) if dev.supports( rs.camera_info.name ) else ""
+    min_fw = next( ( v for k, v in MIN_FW_BY_DEVICE.items() if k in name ), None )
+    if min_fw is None:
+        return
+    fw = dev.get_info( rs.camera_info.firmware_version )
+    if rsutils.version( fw ) < rsutils.version( min_fw ):
+        pytest.skip( f"FW {fw} below minimum {min_fw} for Improved Close Range Depth on {name}" )
+
+
 def _get_close_range_filter( test_device ):
     dev, _ = test_device
+    _skip_if_fw_below_minimum( dev )
     depth_sensor = dev.first_depth_sensor()
     f = depth_sensor.get_embedded_filter( rs.embedded_filter_type.improved_close_range_depth )
     if not f:
