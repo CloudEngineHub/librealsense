@@ -356,9 +356,6 @@ class RealSenseManager:
                 # and the post-DFU device-back event would never reach us.
                 update_dev = None
                 target_dev = None
-                with self.lock:
-                    self.devices.clear()
-                    self.device_infos.clear()
 
                 self._wait_for_device_reconnect(device_id, firmware_update_id)
             except RealSenseError:
@@ -528,8 +525,10 @@ class RealSenseManager:
 
         # Cached refs will become invalid after enter_update_state.
         with self.lock:
-            self.devices.pop(device_id, None)
-            self.device_infos.pop(device_id, None)
+            self._remove_device(device_id)
+        self._emit_socket_event(
+            "devices_changed", {"added": [], "removed": [device_id]},
+        )
 
         logging.info("Requesting device to enter DFU mode...")
         updatable.enter_update_state()
