@@ -56,14 +56,18 @@ def detect_frame_drops(frames_dict, prev_frame_counters):
 
 
 def is_frameset_synced(frames_dict):
-    """True if all streams' global timestamps are mutually within tolerance.
+    """True if the depth and IR global timestamps are mutually within tolerance.
 
     A temporally-coincident frameset means the streams have re-aligned, so it is safe to
     resume the strict timestamp checks. This is what lets the test tolerate a transient frame
     drop and resync (RSDEV-11482) instead of asserting on the phase-shifted sets the syncer
     keeps emitting while one stream is still one frame-counter behind another.
+
+    Only depth/IR are considered: they are frame-number matched and are the streams that go
+    one frame period out of phase after a drop. Color is timestamp matched and has its own
+    multi-ms jitter, so including it could keep this gate shut even once depth/IR re-aligned.
     """
-    timestamps = [frame.timestamp for frame in frames_dict.values()]
+    timestamps = [frames_dict[name].timestamp for name in ('depth', 'ir1', 'ir2')]
     return max(timestamps) - min(timestamps) <= TS_TOLERANCE_MS
 
 
