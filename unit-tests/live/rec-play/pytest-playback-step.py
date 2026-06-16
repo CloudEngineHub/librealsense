@@ -14,7 +14,7 @@ import pyrealsense2 as rs
 from pytest_check import check
 from rspy import repo
 
-RECORDING = "d555_all_streams_native_ros2.db3"
+RECORDING = "d455_depth_non_native.db3"
 NUM_STEPS = 3
 STEP_TIMEOUT_MS = 2000  # the broken behavior delivers nothing and times out
 
@@ -30,8 +30,8 @@ def test_playback_step():
                          if any( p.stream_type() == rs.stream.depth for p in s.get_stream_profiles() ) )
     depth_profile = next( p for p in depth_sensor.get_stream_profiles()
                           if p.stream_type() == rs.stream.depth )
-    fps = depth_profile.fps() or 30  # native bags report fps=0
-    step_ns = int( 1e9 / fps )       # one frame, the viewer's step size
+    fps = depth_profile.fps()  # next line will throw if using a native recording as they report 0 fps
+    step_ns = int( 1e9 / fps )  # one frame, the viewer's step size
     queue = rs.frame_queue( 10 )
     depth_sensor.open( depth_profile )
     depth_sensor.start( queue )
