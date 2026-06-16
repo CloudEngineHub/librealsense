@@ -123,7 +123,7 @@ stream_profiles formats_converter::get_all_possible_profiles( const stream_profi
                         // payload rather than an image. Build an inference_stream_profile directly
                         // so record/playback take the inference path and dimensions are not advertised.
                         std::shared_ptr< stream_profile_interface > cloned_profile;
-                        if( is_inference_stream( target.stream )
+                        if( target.stream == RS2_STREAM_OBJECT_DETECTION
                             && ! std::dynamic_pointer_cast< inference_stream_profile >( raw_profile ) )
                         {
                             auto inf = std::make_shared< inference_stream_profile >();

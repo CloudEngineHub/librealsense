@@ -238,19 +238,6 @@ namespace librealsense
         }
     };
 
-    // True for stream types whose frames are inference results (variable-length binary payloads)
-    // rather than images. Used to keep record/playback and profile-cloning paths inference-aware.
-    inline bool is_inference_stream( rs2_stream stream )
-    {
-        switch( stream )
-        {
-        case RS2_STREAM_OBJECT_DETECTION:
-            return true;
-        default:
-            return false;
-        }
-    }
-
     inline stream_profile to_profile(const stream_profile_interface* sp)
     {
         auto fps = static_cast<uint32_t>(sp->get_framerate());
