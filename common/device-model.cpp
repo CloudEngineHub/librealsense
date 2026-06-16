@@ -1314,6 +1314,12 @@ namespace rs2
                 //   D585 Proto: 0x0C07 <-> 0x0C08
                 if (dev.supports(RS2_CAMERA_INFO_PRODUCT_ID) && dev.is<debug_protocol>())
                 {
+                    static constexpr uint32_t MWD_OPCODE          = 0x02U;
+                    static constexpr uint32_t MODE_REG_START_ADDR = 0x80000064U;
+                    static constexpr uint32_t MODE_REG_END_ADDR   = 0x80000068U;
+                    static constexpr uint32_t MODE_DEDICATED_RGB  = 0U;
+                    static constexpr uint32_t MODE_DUAL_RGB       = 1U;
+
                     std::string current_pid = dev.get_info(RS2_CAMERA_INFO_PRODUCT_ID);
                     const bool is_dual_rgb      = (current_pid == "0C01") || (current_pid == "0C04") || (current_pid == "0C07");
                     const bool is_dedicated_rgb = (current_pid == "0C02") || (current_pid == "0C05") || (current_pid == "0C08");
@@ -1322,14 +1328,13 @@ namespace rs2
                         const std::string toggle_label = is_dual_rgb
                             ? "Switch to Dedicated-RGB Mode"
                             : "Switch to Dual-RGB Mode";
-                        if (ImGui::Selectable(toggle_label.c_str()))
+                        const ImGuiSelectableFlags toggle_flags = is_streaming
+                            ? ImGuiSelectableFlags_Disabled : ImGuiSelectableFlags_None;
+                        if (ImGui::Selectable(toggle_label.c_str(), false, toggle_flags))
                         {
                             try
                             {
-                                const uint32_t mwd_opcode = 0x02;
-                                const uint32_t addr_start = 0x80000064;
-                                const uint32_t addr_end   = 0x80000068;
-                                const uint32_t value = is_dual_rgb ? 0u : 1u;
+                                const uint32_t value = is_dual_rgb ? MODE_DEDICATED_RGB : MODE_DUAL_RGB;
                                 const std::vector<uint8_t> data = {
                                     static_cast<uint8_t>( value         & 0xFF),
                                     static_cast<uint8_t>((value >>  8 ) & 0xFF),
@@ -1337,7 +1342,7 @@ namespace rs2
                                     static_cast<uint8_t>((value >> 24 ) & 0xFF) };
 
                                 auto dp = dev.as<debug_protocol>();
-                                auto cmd = dp.build_command(mwd_opcode, addr_start, addr_end, 0, 0, data);
+                                auto cmd = dp.build_command(MWD_OPCODE, MODE_REG_START_ADDR, MODE_REG_END_ADDR, 0, 0, data);
 
                                 dp.send_and_receive_raw_data(cmd);
                                 restarting_device_info = get_device_info(dev, false);
@@ -1354,7 +1359,10 @@ namespace rs2
                         }
                         if (ImGui::IsItemHovered())
                         {
-                            RsImGui::CustomTooltip("%s", "Switch Dual-RGB / Dedicated Color Sensor Mode");
+                            std::string tooltip = rsutils::string::from()
+                                << "Switch Dual-RGB / Dedicated Color Sensor Mode"
+                                << (is_streaming ? " (Disabled while streaming)" : "");
+                            RsImGui::CustomTooltip("%s", tooltip.c_str());
                         }
                     }
                 }
