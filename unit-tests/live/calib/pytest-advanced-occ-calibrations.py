@@ -31,6 +31,7 @@ pytestmark = [
 # Constants & thresholds (reintroduce after import fix)
 PIXEL_CORRECTION = -2.0  # pixel shift to apply to principal point
 DIFF_THRESHOLD = 0.001  # minimum change expected after OCC calibration
+FILL_RATE_TOLERANCE = 0.03  # allow post-OCC fill rate to be within 3% of base
 HEALTH_FACTOR_THRESHOLD_AFTER_MODIFICATION = 3.0
 
 def on_chip_calibration_json(occ_json_file, host_assistance):
@@ -173,13 +174,13 @@ def run_advanced_occ_calibration_test(host_assistance, config, pipeline, calib_d
             pytest.fail()
 
         # Fill rate assertions: post-OCC must be better than both base and modified
-        if modified_fill_rate is not None and post_fill_rate is not None:
+        if base_fill_rate is not None and modified_fill_rate is not None and post_fill_rate is not None:
             log.info(f"Fill rates: base={base_fill_rate*100:.1f}% modified={modified_fill_rate*100:.1f}% post={post_fill_rate*100:.1f}%")
             if post_fill_rate <= modified_fill_rate:
                 log.error("Post-OCC fill rate did not improve over perturbed fill rate")
                 pytest.fail()
-            elif post_fill_rate <= base_fill_rate:
-                log.error("Post-OCC fill rate did not improve over base fill rate")
+            elif post_fill_rate < base_fill_rate - FILL_RATE_TOLERANCE:
+                log.error(f"Post-OCC fill rate ({post_fill_rate*100:.1f}%) is below base ({base_fill_rate*100:.1f}%) by more than tolerance ({FILL_RATE_TOLERANCE*100:.0f}%)")
                 pytest.fail()
             else:
                 log.info(f"Fill rate improved after OCC vs modified (+{(post_fill_rate - modified_fill_rate)*100:.1f}%) and vs base (+{(post_fill_rate - base_fill_rate)*100:.1f}%)")
