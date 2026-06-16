@@ -19,6 +19,7 @@
 #include "d500-motion.h"
 #include "d500-safety.h"
 #include "d500-depth-mapping.h"
+#include "d500-object-detection.h"
 #include "sync.h"
 #include <src/ds/ds-thermal-monitor.h>
 #include <src/ds/d500/d500-options.h>
@@ -42,7 +43,7 @@ using rsutils::string::hexdump;
 
 namespace librealsense
 {
-std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr< stream_interface > > const & streams )
+    std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr< stream_interface > > const & streams )
     {
         // Create default matcher for all non-null streams
         std::vector< stream_interface * > streams_to_match;
@@ -81,6 +82,7 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
         std::vector< tagged_profile > get_profiles_tags() const override
         {
             std::vector< tagged_profile > tags;
+
             auto usb_spec = get_usb_spec();
             if( usb_spec >= platform::usb3_type || usb_spec == platform::usb_undefined )
             {
@@ -94,6 +96,7 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
                 tags.push_back( { RS2_STREAM_INFRARED, 1, 640, 480, RS2_FORMAT_RGB8, 15, profile_tag::PROFILE_TAG_SUPERSET | profile_tag::PROFILE_TAG_DEFAULT } );
                 tags.push_back( { RS2_STREAM_INFRARED, 2, 640, 480, RS2_FORMAT_RGB8, 15, profile_tag::PROFILE_TAG_SUPERSET } );
             }
+
             return tags;
         };
     };
@@ -136,9 +139,9 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
         {
             std::vector<tagged_profile> tags;
 
-            // TODO - Are infrared streams default? Should be Y8 or RGB8 (Dual RGB use case)
+            // TODO - Infrared streams should be RGB8 once dual RGB phase 2 FW is ready.
             tags.push_back({ RS2_STREAM_DEPTH, -1, 1280, 720, RS2_FORMAT_Z16, 30, profile_tag::PROFILE_TAG_SUPERSET | profile_tag::PROFILE_TAG_DEFAULT });
-            tags.push_back({ RS2_STREAM_INFRARED, -1, 1280, 720, RS2_FORMAT_Y8, 30, profile_tag::PROFILE_TAG_SUPERSET });
+            tags.push_back({ RS2_STREAM_INFRARED, -1, 1280, 720, RS2_FORMAT_Y8, 30, profile_tag::PROFILE_TAG_SUPERSET | profile_tag::PROFILE_TAG_DEFAULT });
             tags.push_back({ RS2_STREAM_GYRO, -1, 0, 0, RS2_FORMAT_MOTION_XYZ32F, (int)odr::IMU_FPS_200, profile_tag::PROFILE_TAG_SUPERSET | profile_tag::PROFILE_TAG_DEFAULT });
             tags.push_back({ RS2_STREAM_ACCEL, -1, 0, 0, RS2_FORMAT_MOTION_XYZ32F, (int)odr::IMU_FPS_100, profile_tag::PROFILE_TAG_SUPERSET | profile_tag::PROFILE_TAG_DEFAULT });
             
@@ -146,11 +149,13 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
         };
     };
 
+
     // D585 or D535 with dedicated color sensor. Can be with IR filter on lens or without.
     class rs5x5_dedicated_color_device
         : public d500_active
         , public d500_color
         , public d500_motion
+        , public d500_object_detection
         , public ds_advanced_mode_base
         , public extended_firmware_logger_device
     {
@@ -162,6 +167,7 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
             , d500_active( dev_info )
             , d500_color( dev_info, RS2_FORMAT_M420 )
             , d500_motion( dev_info )
+            , d500_object_detection( dev_info )
             , ds_advanced_mode_base()
             , extended_firmware_logger_device( dev_info, d500_device::_hw_monitor, get_firmware_logs_command() )
         {
@@ -177,7 +183,8 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
 
             std::vector< std::shared_ptr< stream_interface > > streams = { _depth_stream, _left_ir_stream, _right_ir_stream, _color_stream,
                                                                            _ds_motion_common->get_accel_stream(),
-                                                                           _ds_motion_common->get_gyro_stream() };
+                                                                           _ds_motion_common->get_gyro_stream(),
+                                                                           _object_detection_stream };
             return create_default_matcher( streams );
         }
 
@@ -190,6 +197,7 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
             tags.push_back({ RS2_STREAM_INFRARED, -1, 1280, 720, RS2_FORMAT_Y8, 30, profile_tag::PROFILE_TAG_SUPERSET });
             tags.push_back({ RS2_STREAM_GYRO, -1, 0, 0, RS2_FORMAT_MOTION_XYZ32F, (int)odr::IMU_FPS_200, profile_tag::PROFILE_TAG_SUPERSET | profile_tag::PROFILE_TAG_DEFAULT });
             tags.push_back({ RS2_STREAM_ACCEL, -1, 0, 0, RS2_FORMAT_MOTION_XYZ32F, (int)odr::IMU_FPS_100, profile_tag::PROFILE_TAG_SUPERSET | profile_tag::PROFILE_TAG_DEFAULT });
+            tags.push_back({ RS2_STREAM_OBJECT_DETECTION, -1, -1, -1, RS2_FORMAT_Y8, -1, profile_tag::PROFILE_TAG_SUPERSET });
             
             return tags;
         };
@@ -200,6 +208,7 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
         : public d500_active
         , public d500_color
         , public d500_motion
+        , public d500_object_detection
         , public ds_advanced_mode_base
         , public extended_firmware_logger_device
     {
@@ -211,6 +220,7 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
             , d500_active( dev_info )
             , d500_color( dev_info, RS2_FORMAT_M420 )
             , d500_motion( dev_info )
+            , d500_object_detection( dev_info )
             , ds_advanced_mode_base()
             , extended_firmware_logger_device( dev_info, d500_device::_hw_monitor, get_firmware_logs_command() )
         {
@@ -222,7 +232,8 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
 
             std::vector< std::shared_ptr< stream_interface > > streams = { _depth_stream, _left_ir_stream, _right_ir_stream, _color_stream,
                                                                            _ds_motion_common->get_accel_stream(),
-                                                                           _ds_motion_common->get_gyro_stream() };
+                                                                           _ds_motion_common->get_gyro_stream(),
+                                                                           _object_detection_stream };
             return create_default_matcher( streams );
         }
 
@@ -235,11 +246,13 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
             tags.push_back({ RS2_STREAM_INFRARED, -1, 1280, 960, RS2_FORMAT_Y8, 30, profile_tag::PROFILE_TAG_SUPERSET });
             tags.push_back({ RS2_STREAM_GYRO, -1, 0, 0, RS2_FORMAT_MOTION_XYZ32F, (int)odr::IMU_FPS_200, profile_tag::PROFILE_TAG_SUPERSET | profile_tag::PROFILE_TAG_DEFAULT });
             tags.push_back({ RS2_STREAM_ACCEL, -1, 0, 0, RS2_FORMAT_MOTION_XYZ32F, (int)odr::IMU_FPS_100, profile_tag::PROFILE_TAG_SUPERSET | profile_tag::PROFILE_TAG_DEFAULT });
+            tags.push_back({ RS2_STREAM_OBJECT_DETECTION, -1, -1, -1, RS2_FORMAT_Y8, -1, profile_tag::PROFILE_TAG_SUPERSET });
             
             return tags;
         };
     };
     
+
     class rs585s_device
         : public d500_active
         , public d500_color
@@ -302,10 +315,12 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
         };
     };
     
+
     class rs555_device
         : public d500_active
         , public d500_color
         , public d500_motion
+        , public d500_object_detection
         , public ds_advanced_mode_base
         , public extended_firmware_logger_device
         , public eth_config_device
@@ -318,6 +333,7 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
             , d500_active( dev_info )
             , d500_color( dev_info, RS2_FORMAT_YUYV )
             , d500_motion( dev_info )
+            , d500_object_detection( dev_info )
             , ds_advanced_mode_base()
             , extended_firmware_logger_device( dev_info, d500_device::_hw_monitor, get_firmware_logs_command() )
         {
@@ -355,7 +371,8 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
 
             std::vector< std::shared_ptr< stream_interface > > streams = { _depth_stream, _left_ir_stream, _right_ir_stream, _color_stream,
                                                                            _ds_motion_common->get_accel_stream(),
-                                                                           _ds_motion_common->get_gyro_stream() };
+                                                                           _ds_motion_common->get_gyro_stream(),
+                                                                           _object_detection_stream };
             return create_default_matcher( streams );
         }
 
@@ -368,6 +385,7 @@ std::shared_ptr< matcher > create_default_matcher( std::vector < std::shared_ptr
             tags.push_back( { RS2_STREAM_INFRARED, -1, 896, 504, RS2_FORMAT_Y8, 30, profile_tag::PROFILE_TAG_SUPERSET } );
             tags.push_back( { RS2_STREAM_GYRO, -1, 0, 0, RS2_FORMAT_MOTION_XYZ32F, (int)odr::IMU_FPS_200, profile_tag::PROFILE_TAG_SUPERSET | profile_tag::PROFILE_TAG_DEFAULT } );
             tags.push_back( { RS2_STREAM_ACCEL, -1, 0, 0, RS2_FORMAT_MOTION_XYZ32F, (int)odr::IMU_FPS_100, profile_tag::PROFILE_TAG_SUPERSET | profile_tag::PROFILE_TAG_DEFAULT } );
+            tags.push_back({ RS2_STREAM_OBJECT_DETECTION, -1, -1, -1, RS2_FORMAT_Y8, -1, profile_tag::PROFILE_TAG_SUPERSET });
 
             return tags;
         };

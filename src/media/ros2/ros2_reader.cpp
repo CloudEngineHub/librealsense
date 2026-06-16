@@ -192,7 +192,7 @@ namespace librealsense
             payload->number_of_detections = n_detections;
             payload->source               = static_cast< uint8_t >( object_detection_frame::source::RGB );
             payload->source_frame_id      = j.value( "source_frame_id", uint32_t(0) );
-            payload->timestamp            = j.value( "timestamp_us", 0.0 ) * 1e-6;  // us → seconds
+            payload->timestamp_ms         = j.value( "timestamp_us", 0.0 ) * MICROSEC_TO_MILLISEC;
 
             auto dets_j = j.find( "detections" );
             if( dets_j != j.end() && dets_j->is_array() )

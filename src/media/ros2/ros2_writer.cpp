@@ -256,7 +256,7 @@ namespace librealsense
             json << "],"
                  << "\"source_frame_id\":" << raw->source_frame_id << ","
                  << "\"version\":"         << raw->header.version << ","
-                 << "\"timestamp_us\":"    << (raw->timestamp * 1e6)
+                 << "\"timestamp_us\":"    << (raw->timestamp_ms * MILLISEC_TO_MICROSEC)
                  << "}";
 
             write_string(ros2_topic::frame_data_topic(stream_id), timestamp, json.str());
