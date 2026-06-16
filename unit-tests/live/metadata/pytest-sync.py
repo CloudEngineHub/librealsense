@@ -105,7 +105,10 @@ def run_test(device, ctx, resolution, fps):
     time.sleep(2)  # stabilization once all streams are firing
 
     prev_frame_counters = {'depth': None, 'ir1': None, 'ir2': None, 'color': None}
-    recovering = False
+    # Start in the recovering state: the streams can come up already phase-shifted (a drop right
+    # at startup), and the first frameset has no previous counter to detect that drop against.
+    # Waiting for a coincident frameset before the first check closes that startup edge.
+    recovering = True
     frames_since_drop = 0
     consecutive_drops = 0
     unskipped_frames = 0
@@ -139,16 +142,16 @@ def run_test(device, ctx, resolution, fps):
                 log.warning(f"Frame drop at frame {unskipped_frames}, waiting for streams to re-synchronize")
                 continue
 
-            # During recovery, wait for a temporally-coincident frameset before resuming. This pegs
-            # recovery to actual re-synchronization rather than a fixed frame count, while still
-            # failing if the streams never re-align (a real, persistent desync).
+            # While recovering (at startup, or after a drop), wait for a temporally-coincident
+            # frameset before resuming. This pegs recovery to actual synchronization rather than a
+            # fixed frame count, while still failing if the streams never align (a real desync).
             if recovering:
                 frames_since_drop += 1
                 if frames_since_drop < SKIP_FRAMES_AFTER_DROP or not is_frameset_synced(frames_dict):
                     assert frames_since_drop <= MAX_FRAMES_AWAITING_RESYNC, \
-                        f"Streams did not re-synchronize within {MAX_FRAMES_AWAITING_RESYNC} frames after a drop"
+                        f"Streams did not synchronize within {MAX_FRAMES_AWAITING_RESYNC} frames"
                     continue
-                log.info(f"Streams re-synchronized {frames_since_drop} frames after the drop")
+                log.info(f"Streams synchronized after {frames_since_drop} frames; resuming checks")
                 recovering = False
 
             consecutive_drops = 0
