@@ -5,7 +5,6 @@
 #include "frame.h"
 #include "core/extension.h"
 #include <librealsense2/h/rs_types.h>
-#include <librealsense2/h/rs_sensor.h>
 
 namespace librealsense {
 
@@ -23,18 +22,5 @@ public:
 };
 
 MAP_EXTENSION(RS2_EXTENSION_INFERENCE_FRAME, librealsense::inference_frame);
-
-// True for stream types whose frames are inference results (variable-length binary payloads)
-// rather than images. Used to keep record/playback and profile-cloning paths inference-aware.
-inline bool is_inference_stream( rs2_stream stream )
-{
-    switch( stream )
-    {
-    case RS2_STREAM_OBJECT_DETECTION:
-        return true;
-    default:
-        return false;
-    }
-}
 
 }  // namespace librealsense

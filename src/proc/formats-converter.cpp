@@ -5,7 +5,6 @@
 #include "stream.h"
 #include <src/composite-frame.h>
 #include <src/core/frame-callback.h>
-#include <src/inference-frame.h>
 
 #include <rsutils/string/from.h>
 #include <ostream>
@@ -320,21 +319,18 @@ void formats_converter::update_target_profiles_data( const stream_profiles & fro
             raw_profile->set_stream_type( from_profile->get_stream_type() );
             auto video_raw_profile = As< video_stream_profile, stream_profile_interface >( raw_profile );
             const auto video_from_profile = As< video_stream_profile, stream_profile_interface >( from_profile );
-            if( video_raw_profile )
+            // Skip both intrinsics and dims forwarding when from_profile is non-video (e.g. inference):
+            // the raw UVC profile keeps its enumerated dims, and no synthetic intrinsics callback is installed.
+            if( video_raw_profile && video_from_profile )
             {
                 video_raw_profile->set_intrinsics( [video_from_profile]()
                 {
-                    if( video_from_profile )
-                        return video_from_profile->get_intrinsics();
-                    else
-                        return rs2_intrinsics{};
+                    return video_from_profile->get_intrinsics();
                 } );
 
                 // Hack for L515 confidence.
                 // Requesting source resolution from the camera, getting frame size of target (*2 y axis resolution)
-                // Skip when from_profile is non-video (e.g. inference): the raw profile keeps its UVC dims.
-                if( video_from_profile )
-                    video_raw_profile->set_dims( video_from_profile->get_width(), video_from_profile->get_height() );
+                video_raw_profile->set_dims( video_from_profile->get_width(), video_from_profile->get_height() );
             }
         }
     }
