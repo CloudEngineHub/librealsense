@@ -1316,7 +1316,10 @@ namespace rs2
                     const bool is_c8 = (current_pid == "0C08");
                     if (is_c7 || is_c8)
                     {
-                        if (ImGui::Selectable("Toggle Device PID"))
+                        const std::string toggle_label = is_c7
+                            ? "Switch to Dedicated-RGB Mode"
+                            : "Switch to Dual-RGB Mode";
+                        if (ImGui::Selectable(toggle_label.c_str()))
                         {
                             try
                             {
