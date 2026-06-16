@@ -1308,15 +1308,18 @@ namespace rs2
                     }
                 }
 
-                // Prototype PID toggle for D585 2C/3C (0x0C07 <-> 0x0C08).
+                // PID toggle between Dual-RGB (2C) and Dedicated-RGB (3C) variants:
+                //   D535:       0x0C01 <-> 0x0C02
+                //   D585:       0x0C04 <-> 0x0C05
+                //   D585 Proto: 0x0C07 <-> 0x0C08
                 if (dev.supports(RS2_CAMERA_INFO_PRODUCT_ID) && dev.is<debug_protocol>())
                 {
                     std::string current_pid = dev.get_info(RS2_CAMERA_INFO_PRODUCT_ID);
-                    const bool is_c7 = (current_pid == "0C07");
-                    const bool is_c8 = (current_pid == "0C08");
-                    if (is_c7 || is_c8)
+                    const bool is_dual_rgb      = (current_pid == "0C01") || (current_pid == "0C04") || (current_pid == "0C07");
+                    const bool is_dedicated_rgb = (current_pid == "0C02") || (current_pid == "0C05") || (current_pid == "0C08");
+                    if (is_dual_rgb || is_dedicated_rgb)
                     {
-                        const std::string toggle_label = is_c7
+                        const std::string toggle_label = is_dual_rgb
                             ? "Switch to Dedicated-RGB Mode"
                             : "Switch to Dual-RGB Mode";
                         if (ImGui::Selectable(toggle_label.c_str()))
@@ -1326,7 +1329,7 @@ namespace rs2
                                 const uint32_t mwd_opcode = 0x02;
                                 const uint32_t addr_start = 0x80000064;
                                 const uint32_t addr_end   = 0x80000068;
-                                const uint32_t value = is_c7 ? 0u : 1u;
+                                const uint32_t value = is_dual_rgb ? 0u : 1u;
                                 const std::vector<uint8_t> data = {
                                     static_cast<uint8_t>( value         & 0xFF),
                                     static_cast<uint8_t>((value >>  8 ) & 0xFF),
@@ -1351,11 +1354,7 @@ namespace rs2
                         }
                         if (ImGui::IsItemHovered())
                         {
-                            std::string current_name = dev.supports(RS2_CAMERA_INFO_NAME)
-                                ? dev.get_info(RS2_CAMERA_INFO_NAME) : "this device";
-                            std::string tooltip = rsutils::string::from()
-                                << "Switch " << current_name << " to its alternate PID variant and reset";
-                            RsImGui::CustomTooltip("%s", tooltip.c_str());
+                            RsImGui::CustomTooltip("%s", "Switch Dual-RGB / Dedicated Color Sensor Mode");
                         }
                     }
                 }
