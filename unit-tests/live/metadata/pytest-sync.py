@@ -18,8 +18,8 @@ pytestmark = [
 # Test parameters
 TS_TOLERANCE_MS = 1.5  # Tolerance for timestamp differences in ms
 TS_TOLERANCE_MICROSEC = TS_TOLERANCE_MS * 1000
-SKIP_FRAMES_AFTER_DROP = 10  # Minimum frames to let the hardware settle after a drop
-MAX_RECOVERY_FRAMES = 120  # Fail only if the streams never synchronize within this many frames of a recovery window
+SKIP_FRAMES_AFTER_DROP = 10  # min frames to settle after a drop before re-checking
+MAX_RECOVERY_FRAMES = 120  # fail only if streams never re-sync within this many frames
 
 CONFIGURATIONS = [
     ((640, 480), 15),
@@ -56,19 +56,11 @@ def detect_frame_drops(frames_dict, prev_frame_counters):
 
 
 def is_frameset_synced(frames_dict):
-    """True if the depth and IR global timestamps are mutually within tolerance.
-
-    A temporally-coincident frameset means the streams have re-aligned, so it is safe to
-    resume the strict timestamp checks. This is what lets the test tolerate a transient frame
-    drop and resync (RSDEV-11482) instead of asserting on the phase-shifted sets the syncer
-    keeps emitting while one stream is still one frame-counter behind another.
-
-    Only depth/IR are considered: they are frame-number matched and are the streams that go
-    one frame period out of phase after a drop. Color is timestamp matched and has its own
-    multi-ms jitter, so including it could keep this gate shut even once depth/IR re-aligned.
-    """
-    timestamps = [frames_dict[name].timestamp for name in ('depth', 'ir1', 'ir2')]
-    return max(timestamps) - min(timestamps) <= TS_TOLERANCE_MS
+    """Depth/IR global timestamps mutually within tolerance. Color is excluded: it is
+    timestamp-matched (own jitter); depth/IR are the frame-number-matched streams that
+    phase-shift by ~one frame period after a drop (RSDEV-11482)."""
+    ts = [frames_dict[s].timestamp for s in ('depth', 'ir1', 'ir2')]
+    return max(ts) - min(ts) <= TS_TOLERANCE_MS
 
 
 def run_test(device, ctx, resolution, fps):
@@ -97,21 +89,12 @@ def run_test(device, ctx, resolution, fps):
             pytest.fail(f"Sensor {sensor.name} does not support global time option")
 
     pipeline.start(cfg)
-
-    # The pipeline aggregator only publishes a frameset once every enabled stream is present,
-    # so the first wait_for_frames() already returns a full set. Use it to confirm all streams
-    # are firing, then stabilize over live streaming rather than stream bring-up.
-    pipeline.wait_for_frames()
-    time.sleep(2)  # stabilization once all streams are firing
+    pipeline.wait_for_frames()  # first full set (aggregator waits for all streams) before settling
+    time.sleep(2)
 
     prev_frame_counters = {'depth': None, 'ir1': None, 'ir2': None, 'color': None}
-    # Start in the recovering state: the streams can come up already phase-shifted (a drop right
-    # at startup), and the first frameset has no previous counter to detect that drop against.
-    # Waiting for a coincident frameset before the first check closes that startup edge.
-    recovering = True
-    recovery_frames = 0  # framesets since the current recovery window began (not reset per drop)
-    drops_in_window = 0  # frame drops seen during the current recovery window (reported, not capped)
-    unskipped_frames = 0
+    recovering = True  # gate the first frameset too -- streams may come up phase-shifted
+    recovery_frames = drops_in_window = unskipped_frames = 0
 
     try:
         while unskipped_frames < 100:
@@ -130,30 +113,20 @@ def run_test(device, ctx, resolution, fps):
             frame_drop_detected, current_frame_counters = detect_frame_drops(frames_dict, prev_frame_counters)
             prev_frame_counters = current_frame_counters
 
-            # A drop can leave the streams phase-shifted (one stream a frame-counter behind another),
-            # so the syncer keeps emitting framesets whose timestamps differ by ~one frame period.
-            # Enter a recovery window and don't run the strict checks until the streams re-synchronize.
+            # After a drop the syncer emits phase-shifted sets; recover until depth/IR re-sync.
+            # Report the drops, but only fail if they never re-sync within MAX_RECOVERY_FRAMES.
             if frame_drop_detected and not recovering:
-                recovering = True
-                recovery_frames = 0
-                drops_in_window = 0
-
-            # While recovering (at startup, or after a drop), count how many frames/drops it takes
-            # and wait for a temporally-coincident frameset before resuming. We do not abort on the
-            # drop count itself -- it is reported, so we can see how many drops actually occur and
-            # whether the streams ever re-synchronize -- but we still fail if they never synchronize
-            # within MAX_RECOVERY_FRAMES, so a persistent desync is not masked.
+                recovering, recovery_frames, drops_in_window = True, 0, 0
             if recovering:
                 recovery_frames += 1
                 if frame_drop_detected:
                     drops_in_window += 1
-                    log.warning(f"Frame drop while recovering: {drops_in_window} drops over {recovery_frames} frames")
-                if frame_drop_detected or recovery_frames < SKIP_FRAMES_AFTER_DROP \
-                        or not is_frameset_synced(frames_dict):
+                    log.warning(f"Frame drop while recovering: {drops_in_window} drops / {recovery_frames} frames")
+                if frame_drop_detected or recovery_frames < SKIP_FRAMES_AFTER_DROP or not is_frameset_synced(frames_dict):
                     assert recovery_frames <= MAX_RECOVERY_FRAMES, \
-                        f"Streams did not synchronize within {MAX_RECOVERY_FRAMES} frames ({drops_in_window} drops). Hardware issue."
+                        f"Streams never synchronized ({drops_in_window} drops in {MAX_RECOVERY_FRAMES} frames)"
                     continue
-                log.info(f"Streams synchronized after {recovery_frames} frames ({drops_in_window} drops); resuming checks")
+                log.info(f"Synchronized after {recovery_frames} frames ({drops_in_window} drops)")
                 recovering = False
 
             unskipped_frames += 1
