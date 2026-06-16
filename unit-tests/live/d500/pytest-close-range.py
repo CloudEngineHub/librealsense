@@ -26,8 +26,8 @@ pytestmark = [
 # DPP Filter Bitmask bit 5 = "Improved Close Range Depth merge applied"
 CLOSE_RANGE_METADATA_BIT = 1 << 5
 
-# Spec defaults. Enable is forced ON at SDK level (close_range filter ctor sends SET_CUR(1)).
-ENABLE_DEFAULT     = 1.0
+# Spec defaults for the option-specific (DDS-only) sections. The Enable default is
+# device/FW-driven on USB so we don't pin it here.
 RATIO_INDEX_DEFAULT = 1.0    # choices ["1","2","4"], default "2" -> index 1
 SHIFT_DEFAULT      = 0.0
 THRESHOLD_DEFAULT  = 550.0
@@ -81,11 +81,6 @@ def test_close_range_filter_present( test_device ):
     assert rs.option.embedded_filter_enabled in options
 
     log.info( f"close-range exposes {len(options)} option(s): {[str(o) for o in options]}" )
-
-
-def test_close_range_enable_default( test_device ):
-    _, embedded_filter = _get_close_range_filter( test_device )
-    assert embedded_filter.get_option( rs.option.embedded_filter_enabled ) == ENABLE_DEFAULT
 
 
 def test_close_range_enable_round_trip( test_device ):
