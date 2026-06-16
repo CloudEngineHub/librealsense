@@ -129,6 +129,21 @@ stream_profiles formats_converter::get_all_possible_profiles( const stream_profi
                         tmp_raw_profile->set_stream_index( target.index );
                         cloned_profile->set_name( tmp_raw_profile->get_name() );
 
+                        // Inference streams (e.g. object detection) carry a variable-length binary
+                        // payload rather than an image. Surface them as inference_stream_profile so
+                        // record/playback take the inference path and dimensions are not advertised.
+                        if( target.stream == RS2_STREAM_OBJECT_DETECTION
+                            && ! std::dynamic_pointer_cast< inference_stream_profile >( cloned_profile ) )
+                        {
+                            auto inf = std::make_shared< inference_stream_profile >();
+                            inf->set_framerate( cloned_profile->get_framerate() );
+                            inf->set_format( cloned_profile->get_format() );
+                            inf->set_stream_type( cloned_profile->get_stream_type() );
+                            inf->set_stream_index( cloned_profile->get_stream_index() );
+                            inf->set_name( cloned_profile->get_name() );
+                            cloned_profile = inf;
+                        }
+
                         auto cloned_vsp = As< video_stream_profile, stream_profile_interface >( cloned_profile );
                         if( cloned_vsp )
                         {
@@ -317,7 +332,9 @@ void formats_converter::update_target_profiles_data( const stream_profiles & fro
 
                 // Hack for L515 confidence.
                 // Requesting source resolution from the camera, getting frame size of target (*2 y axis resolution)
-                video_raw_profile->set_dims( video_from_profile->get_width(), video_from_profile->get_height() );
+                // Skip when from_profile is non-video (e.g. inference): the raw profile keeps its UVC dims.
+                if( video_from_profile )
+                    video_raw_profile->set_dims( video_from_profile->get_width(), video_from_profile->get_height() );
             }
         }
     }
