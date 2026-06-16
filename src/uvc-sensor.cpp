@@ -197,7 +197,7 @@ void uvc_sensor::open( const stream_profiles & requests )
 
                     // Compressed and inference streams carry variable-length payloads; copy the data as received.
                     if( val_in_range( req_profile_base->get_format(), { RS2_FORMAT_MJPEG } ) || is_inference )
-                        expected_size = static_cast< int >( f.frame_size );
+                        expected_size = f.frame_size;
                     frame_holder fh = _source.alloc_frame(
                         { req_profile_base->get_stream_type(), req_profile_base->get_stream_index(), extension },
                         expected_size,

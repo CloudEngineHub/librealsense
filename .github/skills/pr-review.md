@@ -11,7 +11,7 @@ For opening a PR, pushing commits to one, or updating its description, see `.git
 - **One reply per thread.** Don't summarise multiple threads in one comment.
 - Cite the commit SHA that addresses the comment (`✅ Fixed in <sha>. <one-line summary>`).
 - For deferred items: `⏸ Deferred — <reason>`.
-- Be consice. Use short sentences.
+- Be concise. Use short sentences.
 - For disagreements: give a concrete reason (worked example, edge case) before declining.
 - Don't auto-resolve threads — let the reviewer decide when their concern is settled.
 - Don't link to PR comments as GitHub issues ("see https://github.com/realsenseai/librealsense/issues/4")

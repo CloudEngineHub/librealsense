@@ -33,7 +33,7 @@ Tracked on [RSDEV-1234]
 ```
 
 Keep the Overview jargon-free. Put tables (behavior change, latency, benchmarks) in the body, never in the Overview.
-Be consice when describing changes. Use short sentences. e.g avoid listing multiple enum literals when describing added enum.
+Be concise when describing changes. Use short sentences. e.g. avoid listing multiple enum literals when describing added enum.
 
 ## Before Every Push — Description Audit
 
