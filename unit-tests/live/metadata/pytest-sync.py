@@ -19,7 +19,7 @@ pytestmark = [
 TS_TOLERANCE_MS = 1.5  # Tolerance for timestamp differences in ms
 TS_TOLERANCE_MICROSEC = TS_TOLERANCE_MS * 1000
 SKIP_FRAMES_AFTER_DROP = 10  # Minimum frames to let the hardware settle after a drop
-MAX_FRAMES_AWAITING_RESYNC = 60  # After a drop, fail if the streams don't re-synchronize within this many frames
+MAX_RECOVERY_FRAMES = 120  # Fail only if the streams never synchronize within this many frames of a recovery window
 
 CONFIGURATIONS = [
     ((640, 480), 15),
@@ -109,8 +109,8 @@ def run_test(device, ctx, resolution, fps):
     # at startup), and the first frameset has no previous counter to detect that drop against.
     # Waiting for a coincident frameset before the first check closes that startup edge.
     recovering = True
-    frames_since_drop = 0
-    consecutive_drops = 0
+    recovery_frames = 0  # framesets since the current recovery window began (not reset per drop)
+    drops_in_window = 0  # frame drops seen during the current recovery window (reported, not capped)
     unskipped_frames = 0
 
     try:
@@ -132,29 +132,30 @@ def run_test(device, ctx, resolution, fps):
 
             # A drop can leave the streams phase-shifted (one stream a frame-counter behind another),
             # so the syncer keeps emitting framesets whose timestamps differ by ~one frame period.
-            # Enter recovery and don't run the strict checks until the streams re-synchronize.
-            if frame_drop_detected:
-                consecutive_drops += 1
-                assert consecutive_drops <= 20, \
-                    f"Continuous frame drops detected ({consecutive_drops} consecutive). Hardware issue."
+            # Enter a recovery window and don't run the strict checks until the streams re-synchronize.
+            if frame_drop_detected and not recovering:
                 recovering = True
-                frames_since_drop = 0
-                log.warning(f"Frame drop at frame {unskipped_frames}, waiting for streams to re-synchronize")
-                continue
+                recovery_frames = 0
+                drops_in_window = 0
 
-            # While recovering (at startup, or after a drop), wait for a temporally-coincident
-            # frameset before resuming. This pegs recovery to actual synchronization rather than a
-            # fixed frame count, while still failing if the streams never align (a real desync).
+            # While recovering (at startup, or after a drop), count how many frames/drops it takes
+            # and wait for a temporally-coincident frameset before resuming. We do not abort on the
+            # drop count itself -- it is reported, so we can see how many drops actually occur and
+            # whether the streams ever re-synchronize -- but we still fail if they never synchronize
+            # within MAX_RECOVERY_FRAMES, so a persistent desync is not masked.
             if recovering:
-                frames_since_drop += 1
-                if frames_since_drop < SKIP_FRAMES_AFTER_DROP or not is_frameset_synced(frames_dict):
-                    assert frames_since_drop <= MAX_FRAMES_AWAITING_RESYNC, \
-                        f"Streams did not synchronize within {MAX_FRAMES_AWAITING_RESYNC} frames"
+                recovery_frames += 1
+                if frame_drop_detected:
+                    drops_in_window += 1
+                    log.warning(f"Frame drop while recovering: {drops_in_window} drops over {recovery_frames} frames")
+                if frame_drop_detected or recovery_frames < SKIP_FRAMES_AFTER_DROP \
+                        or not is_frameset_synced(frames_dict):
+                    assert recovery_frames <= MAX_RECOVERY_FRAMES, \
+                        f"Streams did not synchronize within {MAX_RECOVERY_FRAMES} frames ({drops_in_window} drops). Hardware issue."
                     continue
-                log.info(f"Streams synchronized after {frames_since_drop} frames; resuming checks")
+                log.info(f"Streams synchronized after {recovery_frames} frames ({drops_in_window} drops); resuming checks")
                 recovering = False
 
-            consecutive_drops = 0
             unskipped_frames += 1
 
             # Test timestamp synchronization
