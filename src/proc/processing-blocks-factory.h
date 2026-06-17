@@ -7,6 +7,7 @@
 #include <src/core/stream-profile-interface.h>
 
 #include <vector>
+#include <utility>  // std::declval
 
 #include "../types.h"
 
@@ -31,8 +32,9 @@ namespace librealsense
         std::shared_ptr<processing_block> generate();
         
         static processing_block_factory create_id_pbf(rs2_format format, rs2_stream stream, int idx = 0);
-        template<typename T, typename Fn>
-        static std::vector<processing_block_factory> create_pbf_vector( rs2_format src, const std::vector<rs2_format>& dst, rs2_stream stream, Fn creator )
+        template< typename T, typename Fn,
+                  typename = decltype( std::declval< Fn >()( std::declval< std::shared_ptr< generic_processing_block > >() ) ) >
+        static std::vector<processing_block_factory> create_pbf_vector( rs2_format src, const std::vector<rs2_format>& dst, rs2_stream stream, Fn creator, int idx = 0 )
         {
             std::vector<processing_block_factory> rgb_factories;
             for( auto d : dst )
@@ -40,23 +42,23 @@ namespace librealsense
                 // register identity processing block if requested
                 if( src == d )
                 {
-                    rgb_factories.push_back( { { {src} }, { {src, stream} }, [=]() { return creator( std::make_shared<identity_processing_block>() ); } } );
+                    rgb_factories.push_back( { { {src} }, { {src, stream, idx} }, [=]() { return creator( std::make_shared<identity_processing_block>() ); } } );
                     continue;
                 }
 
-                rgb_factories.push_back( { { {src} }, { {d, stream} }, [=]() { return creator( std::make_shared<T>( d )); } } );
+                rgb_factories.push_back( { { {src} }, { {d, stream, idx} }, [=]() { return creator( std::make_shared<T>( d )); } } );
             }
 
             return rgb_factories;
         }
         template<typename T>
-        static std::vector<processing_block_factory> create_pbf_vector( rs2_format src, const std::vector<rs2_format>& dst, rs2_stream stream )
+        static std::vector<processing_block_factory> create_pbf_vector( rs2_format src, const std::vector<rs2_format>& dst, rs2_stream stream, int idx = 0 )
         {
             return create_pbf_vector< T >( src, dst, stream,
                 []( std::shared_ptr< generic_processing_block > pb )
                 {
                     return pb;
-                } );
+                }, idx );
         }
 
         stream_profiles find_satisfied_requests(const stream_profiles& sp, const stream_profiles& supported_profiles) const;

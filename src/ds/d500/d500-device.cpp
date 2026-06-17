@@ -368,7 +368,7 @@ namespace librealsense
         
         depth_ep->register_processing_block( processing_block_factory::create_pbf_vector< m420_converter >( RS2_FORMAT_M420,
                                                                                                             map_supported_color_formats( RS2_FORMAT_M420 ),
-                                                                                                            RS2_STREAM_INFRARED ) );
+                                                                                                            RS2_STREAM_INFRARED, 1 ) );
         return depth_ep;
     }
 
