@@ -376,7 +376,7 @@ namespace librealsense
                             // misbehaving HID driver (HID class advertised but
                             // never bound) doesn't make the device invisible
                             // forever.
-                            static constexpr auto MAX_DEFERRAL = std::chrono::milliseconds( 10000 );
+                            static constexpr auto MAX_DEFERRAL = std::chrono::milliseconds( 15000 );
                             auto since_first = std::chrono::steady_clock::now() - _data._first_event;
                             if( hid_binding_in_progress( curr ) && since_first < MAX_DEFERRAL )
                             {
