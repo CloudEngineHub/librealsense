@@ -119,21 +119,7 @@ stream_profiles formats_converter::get_all_possible_profiles( const stream_profi
                         if( source.stream == RS2_STREAM_INFRARED && raw_profile->get_stream_index() != target.index )
                             continue;
 
-                        // Inference streams (e.g. object detection) carry a variable-length binary
-                        // payload rather than an image. Build an inference_stream_profile directly
-                        // so record/playback take the inference path and dimensions are not advertised.
-                        std::shared_ptr< stream_profile_interface > cloned_profile;
-                        if( target.stream == RS2_STREAM_OBJECT_DETECTION
-                            && ! std::dynamic_pointer_cast< inference_stream_profile >( raw_profile ) )
-                        {
-                            auto inf = std::make_shared< inference_stream_profile >();
-                            inf->set_framerate( raw_profile->get_framerate() );
-                            cloned_profile = inf;
-                        }
-                        else
-                        {
-                            cloned_profile = clone_profile( raw_profile );
-                        }
+                        auto cloned_profile = clone_profile( raw_profile, target.stream );
                         cloned_profile->set_format( target.format );
                         cloned_profile->set_stream_index( target.index );
                         cloned_profile->set_stream_type( target.stream );
@@ -186,11 +172,22 @@ stream_profiles formats_converter::get_all_possible_profiles( const stream_profi
 }
 
 std::shared_ptr< stream_profile_interface >
-formats_converter::clone_profile( const std::shared_ptr< stream_profile_interface > & raw_profile ) const
+formats_converter::clone_profile( const std::shared_ptr< stream_profile_interface > & raw_profile,
+                                  rs2_stream target_stream ) const
 {
     std::shared_ptr< stream_profile_interface > cloned = nullptr;
 
-    if( auto vsp = std::dynamic_pointer_cast< video_stream_profile >( raw_profile ) )
+    // Inference streams (e.g. object detection) carry a variable-length binary payload rather than
+    // an image. When the target stream is inference, produce an inference_stream_profile regardless
+    // of the raw profile's type, so record/playback take the inference path and dims are not advertised.
+    if( target_stream == RS2_STREAM_OBJECT_DETECTION
+        && ! std::dynamic_pointer_cast< inference_stream_profile >( raw_profile ) )
+    {
+        cloned = std::make_shared< inference_stream_profile >();
+        if( ! cloned )
+            throw librealsense::invalid_value_exception( "failed to clone profile" );
+    }
+    else if( auto vsp = std::dynamic_pointer_cast< video_stream_profile >( raw_profile ) )
     {
         cloned = std::make_shared< video_stream_profile >();
         if( ! cloned )
