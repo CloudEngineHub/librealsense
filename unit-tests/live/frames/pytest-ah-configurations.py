@@ -18,6 +18,10 @@ HD_RESOLUTION = (1280, 720)
 pytestmark = [
     pytest.mark.device_each("D585S"),
     pytest.mark.context("nightly"),
+    # Disabled while D585S FW bug RSDEV-12174 is open: the 2nd open(D+C+S) cycle's
+    # streams produce zero frames and leave the device bricked until USB power-cycle.
+    # Restoration tracked by RSDEV-12175.
+    pytest.mark.skip(reason="RSDEV-12174: D585S FW set_xu / streaming fails on 2nd open(D+C+S) cycle"),
 ]
 
 
