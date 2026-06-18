@@ -279,8 +279,7 @@ namespace rs2
 
         _fullscreen = config_file::instance().get(configurations::window::is_fullscreen);
 
-        rs2_error* e = nullptr;
-        _title_str = rsutils::string::from() << _title << " v" << api_version_to_string(rs2_get_api_version(&e));
+        _title_str = rsutils::string::from() << _title << " v" << RS2_API_FULL_VERSION_STR;
         auto debug = is_debug();
         if (debug)
         {
