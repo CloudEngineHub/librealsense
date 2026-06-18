@@ -19,7 +19,7 @@ const circleSprite = (() => {
 })()
 
 export function PointCloudViewer() {
-  const { pointCloudVertices, isStreaming } = useAppStore()
+  const { pointCloudVertices, pointCloudColors, isStreaming } = useAppStore()
 
   return (
     <div className="h-full flex flex-col">
@@ -48,7 +48,7 @@ export function PointCloudViewer() {
             <PerspectiveCamera makeDefault position={[0, 0, 1]} fov={45} />
             <OrbitControls enablePan enableZoom enableRotate target={[0, 0, -1]} />
             <ambientLight intensity={0.5} />
-            <PointCloud vertices={pointCloudVertices} />
+            <PointCloud vertices={pointCloudVertices} sampledColors={pointCloudColors} />
             <SceneDecor />
           </Canvas>
         ) : (
@@ -83,9 +83,13 @@ export function PointCloudViewer() {
 
 interface PointCloudProps {
   vertices: Float32Array
+  // Optional 1:1 per-vertex RGB sampled from the live color frame on the server
+  // (3 bytes per vertex). When present the cloud is texture-mapped (cpp viewer
+  // parity); when null the per-vertex color falls back to the depth colormap.
+  sampledColors: Uint8Array | null
 }
 
-function PointCloud({ vertices }: PointCloudProps) {
+function PointCloud({ vertices, sampledColors }: PointCloudProps) {
   // One persistent geometry with grow-only fixed-capacity attributes. Inspired by the
   // C++ viewer's upload_points: the GPU buffers are allocated once (regrown only when a
   // frame needs more room) and rewritten in place every frame — no per-frame BufferGeometry
@@ -126,69 +130,87 @@ function PointCloud({ vertices }: PointCloudProps) {
     const positions = posAttr.array as Float32Array
     const colors = colAttr.array as Float32Array
 
-    // Robust depth range via a coarse histogram → 2nd/98th percentile, then EMA-smoothed.
-    // Percentiles (not raw min/max) reject sparse far/near outliers that would otherwise
-    // stretch the range and wash the whole scene to one color; EMA keeps it stable.
-    const HMAX = 10 // meters; histogram window
-    const NB = histRef.current.length
-    const hist = histRef.current
-    hist.fill(0)
-    const sc = NB / HMAX
-    let total = 0
-    for (let i = 2; i < n; i += 3) {
-      const z = vertices[i]
-      if (z <= 0) continue
-      let b = (z * sc) | 0
-      if (b >= NB) b = NB - 1
-      hist[b]++
-      total++
-    }
-    let zlo = NaN
-    let zhi = NaN
-    if (total > 0) {
-      const loT = total * 0.02
-      const hiT = total * 0.98
-      let acc = 0
-      let loB = -1
-      let hiB = NB - 1
-      for (let b = 0; b < NB; b++) {
-        acc += hist[b]
-        if (loB < 0 && acc >= loT) loB = b
-        if (acc >= hiT) { hiB = b; break }
+    // Use server-sampled RGB (textured PC) when the array length matches the
+    // current vertex count. The server sends 3 uint8 bytes per vertex, aligned
+    // 1:1 with `vertices`. Length mismatch can happen for one tick when a
+    // stale frame arrives during decimation-step change → fall back to the
+    // depth colormap that frame.
+    const useSampled = !!sampledColors && sampledColors.length === count * 3
+    if (useSampled) {
+      const src = sampledColors as Uint8Array
+      const INV_255 = 1 / 255
+      for (let i = 0; i < n; i += 3) {
+        // RealSense: x-right, y-down, z-forward (m).  Three.js: x-right, y-up, z-toward-camera.
+        positions[i] = vertices[i]
+        positions[i + 1] = -vertices[i + 1]
+        positions[i + 2] = -vertices[i + 2]
+        colors[i] = src[i] * INV_255
+        colors[i + 1] = src[i + 1] * INV_255
+        colors[i + 2] = src[i + 2] * INV_255
       }
-      if (loB < 0) loB = 0
-      zlo = loB / sc
-      zhi = (hiB + 1) / sc
-    }
-    const r = rangeRef.current
-    if (!isFinite(r.near) || !isFinite(r.far)) {
-      r.near = isFinite(zlo) ? zlo : 0
-      r.far = isFinite(zhi) ? zhi : HMAX
-    } else if (isFinite(zlo) && isFinite(zhi) && zhi > zlo) {
-      const A = 0.1 // ~10-frame time constant
-      r.near += (zlo - r.near) * A
-      r.far += (zhi - r.far) * A
-    }
-    const near = r.near
-    const far = r.far
-    const span = far > near ? far - near : 1
-    const invSpan = 1 / span
+    } else {
+      // Robust depth range via a coarse histogram → 2nd/98th percentile, then EMA-smoothed.
+      // Percentiles (not raw min/max) reject sparse far/near outliers that would otherwise
+      // stretch the range and wash the whole scene to one color; EMA keeps it stable.
+      const HMAX = 10 // meters; histogram window
+      const NB = histRef.current.length
+      const hist = histRef.current
+      hist.fill(0)
+      const sc = NB / HMAX
+      let total = 0
+      for (let i = 2; i < n; i += 3) {
+        const z = vertices[i]
+        if (z <= 0) continue
+        let b = (z * sc) | 0
+        if (b >= NB) b = NB - 1
+        hist[b]++
+        total++
+      }
+      let zlo = NaN
+      let zhi = NaN
+      if (total > 0) {
+        const loT = total * 0.02
+        const hiT = total * 0.98
+        let acc = 0
+        let loB = -1
+        let hiB = NB - 1
+        for (let b = 0; b < NB; b++) {
+          acc += hist[b]
+          if (loB < 0 && acc >= loT) loB = b
+          if (acc >= hiT) { hiB = b; break }
+        }
+        if (loB < 0) loB = 0
+        zlo = loB / sc
+        zhi = (hiB + 1) / sc
+      }
+      const r = rangeRef.current
+      if (!isFinite(r.near) || !isFinite(r.far)) {
+        r.near = isFinite(zlo) ? zlo : 0
+        r.far = isFinite(zhi) ? zhi : HMAX
+      } else if (isFinite(zlo) && isFinite(zhi) && zhi > zlo) {
+        const A = 0.1 // ~10-frame time constant
+        r.near += (zlo - r.near) * A
+        r.far += (zhi - r.far) * A
+      }
+      const near = r.near
+      const far = r.far
+      const span = far > near ? far - near : 1
+      const invSpan = 1 / span
 
-    for (let i = 0; i < n; i += 3) {
-      // RealSense: x-right, y-down, z-forward (meters)
-      // Three.js:  x-right, y-up,   z-toward-camera
-      const z = vertices[i + 2]
-      positions[i] = vertices[i]
-      positions[i + 1] = -vertices[i + 1]
-      positions[i + 2] = -z
+      for (let i = 0; i < n; i += 3) {
+        const z = vertices[i + 2]
+        positions[i] = vertices[i]
+        positions[i + 1] = -vertices[i + 1]
+        positions[i + 2] = -z
 
-      let t = (z - near) * invSpan
-      if (t < 0) t = 0
-      else if (t > 1) t = 1
-      const c = jetColor(t)
-      colors[i] = c[0]
-      colors[i + 1] = c[1]
-      colors[i + 2] = c[2]
+        let t = (z - near) * invSpan
+        if (t < 0) t = 0
+        else if (t > 1) t = 1
+        const c = jetColor(t)
+        colors[i] = c[0]
+        colors[i + 1] = c[1]
+        colors[i + 2] = c[2]
+      }
     }
 
     // Only the first `count` vertices are valid this frame; render exactly those.
@@ -196,7 +218,7 @@ function PointCloud({ vertices }: PointCloudProps) {
     colAttr.needsUpdate = true
     geo.setDrawRange(0, count)
     geo.computeBoundingSphere()
-  }, [vertices])
+  }, [vertices, sampledColors])
 
   return (
     <points geometry={geometry}>

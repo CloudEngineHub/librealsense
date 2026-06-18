@@ -128,6 +128,10 @@ export interface PointCloudData {
   // Raw float32 bytes (Socket.IO binary attachment) or base64-encoded string (legacy server).
   vertices: ArrayBuffer | string
   texture_coordinates: number[]
+  // Per-vertex RGB triplets (uint8, 3 bytes per vertex), matching `vertices` 1:1
+  // when the server textured the cloud from a live color frame. Same wire
+  // encoding as vertices: ArrayBuffer over binary socket, base64 string otherwise.
+  colors?: ArrayBuffer | string
 }
 
 export interface MetadataUpdate {

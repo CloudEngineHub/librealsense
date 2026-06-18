@@ -82,12 +82,18 @@ class MetadataSocketServer:
                             # copy before encoding/dropping to avoid corrupting it for the next read.
                             metadata = {**metadata}
                             if send_point_cloud:
-                                metadata["point_cloud"] = {
-                                    **metadata["point_cloud"],
+                                pc_src = metadata["point_cloud"]
+                                pc_encoded = {
+                                    **pc_src,
                                     "vertices": base64.b64encode(
-                                        metadata["point_cloud"]["vertices"].tobytes()
+                                        pc_src["vertices"].tobytes()
                                     ).decode("utf-8"),
                                 }
+                                if "colors" in pc_src and pc_src["colors"] is not None:
+                                    pc_encoded["colors"] = base64.b64encode(
+                                        pc_src["colors"].tobytes()
+                                    ).decode("utf-8")
+                                metadata["point_cloud"] = pc_encoded
                             else:
                                 del metadata["point_cloud"]
                         all_metadata[stream_type] = metadata

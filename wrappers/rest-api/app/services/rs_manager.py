@@ -73,6 +73,11 @@ class RealSenseManager:
         # Store latest raw depth frames for pixel depth queries
         self.depth_frames: Dict[str, Any] = {}  # device_id -> rs.depth_frame
 
+        # Store latest color frame for texturing the 3D point cloud (sensor-mode
+        # collectors process depth/color on separate threads, so depth needs to
+        # look up the most recent color frame here).
+        self.color_frames: Dict[str, Any] = {}  # device_id -> rs.video_frame
+
         # Cache of supported frame_metadata values keyed by device_id then profile uid.
         # Nested so a single device's profiles can be evicted without wiping others.
         # Avoids re-probing every metadata key on every frame in the hot loop.
@@ -143,6 +148,7 @@ class RealSenseManager:
         self.frame_queues.pop(serial, None)
         self.metadata_queues.pop(serial, None)
         self.depth_frames.pop(serial, None)
+        self.color_frames.pop(serial, None)
         self.devices.pop(serial, None)
         self.device_infos.pop(serial, None)
         self._supported_md_by_profile.pop(serial, None)
@@ -1717,26 +1723,108 @@ class RealSenseManager:
     # stays roughly constant regardless of stream resolution.
     POINT_CLOUD_MAX_VERTICES = 60000
 
-    def _build_point_cloud_metadata(self, depth_frame) -> Optional[Dict]:
+    def _build_point_cloud_metadata(self, depth_frame, color_frame=None) -> Optional[Dict]:
         """Compute decimated point-cloud vertices from a depth frame, ready for serialization.
+
+        When ``color_frame`` is supplied and it's an RGB8/BGR8 frame, this also
+        samples a per-vertex RGB triplet using the texture coordinates produced
+        by ``rs.pointcloud.map_to`` — mirrors the C++ realsense-viewer's textured
+        point cloud rendering. The client falls back to a depth colormap when
+        ``colors`` is absent.
 
         Returns None if calculate() yields nothing. Used by both the pipeline-mode
         frame collector and the sensor-mode frame processor.
         """
+        if color_frame:
+            try:
+                self.pc.map_to(color_frame)
+            except Exception:
+                color_frame = None  # not all profiles support map_to; fall back silently
         points = self.pc.calculate(depth_frame)
         if not points:
             return None
         verts = np.asanyarray(points.get_vertices()).view(np.float32).reshape(-1, 3)
-        verts = verts[verts[:, 2] >= 0.03]  # drop invalid near-camera points
+
+        colors_rgb: Optional[np.ndarray] = None
+        if color_frame:
+            colors_rgb = self._sample_color_for_vertices(points, color_frame)
+            # If the sampled array length doesn't match (e.g. unsupported format
+            # produced None), don't try to align it to verts below.
+            if colors_rgb is not None and len(colors_rgb) != len(verts):
+                colors_rgb = None
+
+        mask = verts[:, 2] >= 0.03  # drop invalid near-camera points
+        verts = verts[mask]
+        if colors_rgb is not None:
+            colors_rgb = colors_rgb[mask]
+
         # Resolution-adaptive decimation: stride to a fixed vertex budget so a
         # 1280x720 cloud isn't an order of magnitude heavier than 640x480.
         count = len(verts)
         if count > self.POINT_CLOUD_MAX_VERTICES:
             step = (count // self.POINT_CLOUD_MAX_VERTICES) + 1
             verts = verts[::step]
-        # Contiguous float32 so .tobytes() in the socket server is a straight memcpy.
+            if colors_rgb is not None:
+                colors_rgb = colors_rgb[::step]
+
+        # Contiguous so .tobytes() in the socket server is a straight memcpy.
         verts = np.ascontiguousarray(verts, dtype=np.float32)
-        return {"vertices": verts, "texture_coordinates": []}
+        result: Dict[str, Any] = {"vertices": verts, "texture_coordinates": []}
+        if colors_rgb is not None:
+            result["colors"] = np.ascontiguousarray(colors_rgb, dtype=np.uint8)
+        return result
+
+    def _is_color_streaming(self, device_id: str) -> bool:
+        """Whether 'color' is currently in this device's active stream set.
+
+        Used by the sensor-mode depth thread to decide whether the cached color
+        frame in ``self.color_frames`` is still fresh enough to texture-map the
+        cloud. Pipeline mode reads color straight from the frameset and doesn't
+        need this — the frameset already drops disabled streams.
+        """
+        mode = self.streaming_mode.get(device_id)
+        if mode == "pipeline":
+            return any(s.lower() == "color" for s in self.active_streams.get(device_id, set()))
+        if device_id in self.sensor_streams:
+            for sensor_info in self.sensor_streams[device_id].values():
+                if not sensor_info.get("is_streaming", False):
+                    continue
+                if any(st.lower() == "color" for st in sensor_info.get("stream_types", [])):
+                    return True
+        return False
+
+    @staticmethod
+    def _sample_color_for_vertices(points, color_frame) -> Optional[np.ndarray]:
+        """Return Nx3 uint8 RGB sampled at each vertex's texture coordinate, or None.
+
+        Only handles RGB8 / BGR8 color frames — other formats (YUYV, Y16, …) fall
+        back to no texture and the client renders the depth colormap.
+        """
+        try:
+            color_format = color_frame.get_profile().format()
+        except Exception:
+            return None
+        if color_format not in (rs.format.rgb8, rs.format.bgr8):
+            return None
+
+        tex = np.asanyarray(points.get_texture_coordinates()).view(np.float32).reshape(-1, 2)
+        cim = np.asanyarray(color_frame.get_data())
+        if cim.ndim != 3 or cim.shape[2] < 3:
+            return None
+        H, W = cim.shape[:2]
+        u = tex[:, 0]
+        v = tex[:, 1]
+        # rs2 emits tex coords outside [0,1] for depth pixels that don't project
+        # into the color frame — mark those black instead of clamping (clamping
+        # would smear the frame borders across off-screen points).
+        valid = (u >= 0.0) & (u <= 1.0) & (v >= 0.0) & (v <= 1.0)
+        xi = np.clip((u * W).astype(np.int32), 0, W - 1)
+        yi = np.clip((v * H).astype(np.int32), 0, H - 1)
+        sampled = cim[yi, xi][:, :3].astype(np.uint8, copy=True)
+        sampled[~valid] = 0
+        if color_format == rs.format.bgr8:
+            sampled = sampled[:, ::-1]  # BGR -> RGB so the client doesn't need to swap
+        return sampled
 
     def _collect_frames(self, device_id: str, align_processor=None):
         """Thread function to collect frames from the pipeline"""
@@ -1839,7 +1927,12 @@ class RealSenseManager:
                                     metadata["motion_data"] = motion_json_data
 
                             if rs_stream == rs.stream.depth and self.is_pointcloud_enabled.get(device_id, False):
-                                pc_meta = self._build_point_cloud_metadata(frame_data)
+                                # If color is also active in this frameset, use it
+                                # to texture-map the cloud (cpp realsense-viewer
+                                # parity). get_color_frame() returns an empty
+                                # falsy frame when no color stream is enabled.
+                                color_for_texture = frames.get_color_frame() or None
+                                pc_meta = self._build_point_cloud_metadata(frame_data, color_for_texture)
                                 if pc_meta:
                                     metadata["point_cloud"] = pc_meta
 
@@ -2145,13 +2238,24 @@ class RealSenseManager:
             info_source = depth_frame
 
             if self.is_pointcloud_enabled.get(device_id, False):
-                pc_meta = self._build_point_cloud_metadata(depth_frame)
+                # Sensor mode runs depth/color on separate threads so there is
+                # no frameset — fall back to the most recent color frame cached
+                # by the color thread, but only if color is *still* an active
+                # stream. Without that check the depth thread would keep
+                # texturing with a stale frame after the user disables color.
+                color_for_texture = (
+                    self.color_frames.get(device_id)
+                    if self._is_color_streaming(device_id)
+                    else None
+                )
+                pc_meta = self._build_point_cloud_metadata(depth_frame, color_for_texture)
                 if pc_meta:
                     metadata["point_cloud"] = pc_meta
 
         elif "color" in frame_stream_name:
             color_frame = frame.as_video_frame()
             color_frame = self._apply_color_filters(device_id, color_frame)
+            self.color_frames[device_id] = color_frame  # cache for textured PC in sensor mode
             processed_frame = np.asanyarray(color_frame.get_data())
             info_source = color_frame
 

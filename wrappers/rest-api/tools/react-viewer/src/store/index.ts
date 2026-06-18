@@ -19,6 +19,23 @@ import type {
 // Used to await completion before allowing a new start
 const pendingStopPromises = new Map<string, Promise<void>>()
 
+// Server sends point-cloud buffers as raw bytes over a Socket.IO binary
+// attachment (ArrayBuffer); older servers / non-binary transports fall back to
+// base64 strings. These helpers normalize both forms to typed arrays.
+function decodeUint8Payload(raw: ArrayBuffer | string): Uint8Array {
+  if (typeof raw === 'string') {
+    return Uint8Array.from(atob(raw), (c) => c.charCodeAt(0))
+  }
+  if (raw instanceof ArrayBuffer) return new Uint8Array(raw)
+  const view = raw as ArrayBufferLike & { byteOffset?: number; byteLength: number }
+  return new Uint8Array(view, view.byteOffset ?? 0, view.byteLength)
+}
+
+function decodeFloat32Payload(raw: ArrayBuffer | string): Float32Array {
+  const u8 = decodeUint8Payload(raw)
+  return new Float32Array(u8.buffer, u8.byteOffset, u8.byteLength >> 2)
+}
+
 function buildStreamConfigs(sensors: SensorInfo[]): StreamConfig[] {
   const configs: StreamConfig[] = []
   for (const sensor of sensors) {
@@ -204,6 +221,11 @@ interface AppState {
   isLoadingOptions: boolean
   isPointCloudEnabled: boolean
   pointCloudVertices: Float32Array | null
+  // Per-vertex RGB sampled from the live color frame on the server (1 Uint8 per
+  // channel, 3 channels per vertex; aligned 1:1 with pointCloudVertices). Null
+  // when the server didn't texture the cloud (no color stream / unsupported
+  // format) — the 3D viewer falls back to a depth colormap in that case.
+  pointCloudColors: Uint8Array | null
 }
 
 export const useAppStore = create<AppState>()((set, get) => ({
@@ -762,6 +784,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     // stop. If another device is still streaming its next frame will repopulate.
     set((state) => ({
       pointCloudVertices: null,
+      pointCloudColors: null,
       deviceStates: {
         ...state.deviceStates,
         [deviceId]: {
@@ -962,6 +985,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         // Drop last point cloud so the 3D canvas doesn't freeze on the last
         // frame; a still-streaming sensor will repopulate within one frame.
         pointCloudVertices: null,
+        pointCloudColors: null,
         deviceStates: {
           ...s.deviceStates,
           [deviceId]: {
@@ -1113,18 +1137,14 @@ export const useAppStore = create<AppState>()((set, get) => ({
         // them would repopulate the cleared cloud and freeze the 3D canvas.
         if (!get().deviceStates[deviceId]?.isStreaming) continue
         try {
-          const raw = streamData.point_cloud.vertices
-          let vertices: Float32Array
-          if (typeof raw === 'string') {
-            const bytes = Uint8Array.from(atob(raw), (c) => c.charCodeAt(0))
-            vertices = new Float32Array(bytes.buffer)
-          } else if (raw instanceof ArrayBuffer) {
-            vertices = new Float32Array(raw)
-          } else {
-            const u8 = new Uint8Array(raw as ArrayBufferLike)
-            vertices = new Float32Array(u8.buffer, u8.byteOffset, u8.byteLength >> 2)
-          }
-          set({ pointCloudVertices: vertices })
+          const vertices = decodeFloat32Payload(streamData.point_cloud.vertices)
+          // Colors are sampled server-side from the color frame (cpp-viewer
+          // parity). Present only when depth+color are both active and the
+          // color format is RGB8/BGR8.
+          const colors = streamData.point_cloud.colors
+            ? decodeUint8Payload(streamData.point_cloud.colors)
+            : null
+          set({ pointCloudVertices: vertices, pointCloudColors: colors })
         } catch (error) {
           console.error('Failed to decode point cloud data:', error)
         }
@@ -1204,7 +1224,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
         await Promise.all(
           activeDevices.map(ds => apiClient.disablePointCloud(ds.device.device_id))
         )
-        set({ pointCloudVertices: null })
+        set({ pointCloudVertices: null, pointCloudColors: null })
       }
     } catch (err) {
       set({
@@ -1467,4 +1487,5 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   pointCloudVertices: null,
+  pointCloudColors: null,
 }))
