@@ -757,8 +757,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   stopDeviceStreaming: async (deviceId) => {
-    // Optimistically mark stopping and hide stream immediately
+    // Optimistically mark stopping and hide stream immediately. Also drop the
+    // last point cloud so the 3D canvas doesn't show a frozen last frame after
+    // stop. If another device is still streaming its next frame will repopulate.
     set((state) => ({
+      pointCloudVertices: null,
       deviceStates: {
         ...state.deviceStates,
         [deviceId]: {
@@ -956,6 +959,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
       )
 
       return {
+        // Drop last point cloud so the 3D canvas doesn't freeze on the last
+        // frame; a still-streaming sensor will repopulate within one frame.
+        pointCloudVertices: null,
         deviceStates: {
           ...s.deviceStates,
           [deviceId]: {
@@ -1102,6 +1108,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
       // Server sends raw float32 bytes as a Socket.IO binary attachment (ArrayBuffer);
       // fall back to base64 string for older servers.
       if (streamData.point_cloud?.vertices) {
+        // Drop frames that arrive after the device was stopped — the server's
+        // stop_broadcast can race with frames already in flight, and accepting
+        // them would repopulate the cleared cloud and freeze the 3D canvas.
+        if (!get().deviceStates[deviceId]?.isStreaming) continue
         try {
           const raw = streamData.point_cloud.vertices
           let vertices: Float32Array
