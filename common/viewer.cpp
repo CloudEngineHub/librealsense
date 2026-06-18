@@ -1028,7 +1028,7 @@ namespace rs2
         syncer = std::make_shared<syncer_model>();
         updates = std::make_shared<updates_model>();
         reset_camera();
-        not_model->add_log( "librealsense version: " + std::string( RS2_API_FULL_VERSION_STR ) + "\n" );
+        not_model->add_log( rsutils::string::from() << "librealsense version: " << RS2_API_FULL_VERSION_STR << "\n" );
 
         update_configuration();
 
