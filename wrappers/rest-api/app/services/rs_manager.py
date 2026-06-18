@@ -60,7 +60,10 @@ class RealSenseManager:
         self.lock = threading.Lock()
         self.max_queue_size = 5
         self.is_pointcloud_enabled: Dict[str, bool] = {}
-        self.pc = rs.pointcloud()
+        # One rs.pointcloud() per device: pc.map_to(color) mutates internal
+        # state, and depth/color threads from different devices would race on
+        # a shared instance (texturing device A's cloud with device B's color).
+        self.point_clouds: Dict[str, "rs.pointcloud"] = {}
 
         # Caches for pipeline/config reuse to reduce startup cost
         self.config_cache: Dict[str, Dict[str, rs.config]] = {}  # device -> signature -> config
@@ -149,6 +152,7 @@ class RealSenseManager:
         self.metadata_queues.pop(serial, None)
         self.depth_frames.pop(serial, None)
         self.color_frames.pop(serial, None)
+        self.point_clouds.pop(serial, None)
         self.devices.pop(serial, None)
         self.device_infos.pop(serial, None)
         self._supported_md_by_profile.pop(serial, None)
@@ -1481,6 +1485,8 @@ class RealSenseManager:
                     self.pipeline_signatures.pop(device_id, None)
                     self.frame_queues.pop(device_id, None)
                     self.metadata_queues.pop(device_id, None)
+                    self.color_frames.pop(device_id, None)
+                    self.point_clouds.pop(device_id, None)
                     self._supported_md_by_profile.pop(device_id, None)
                     self.stopping.discard(device_id)
                     # Reset streaming mode to idle
@@ -1723,7 +1729,7 @@ class RealSenseManager:
     # stays roughly constant regardless of stream resolution.
     POINT_CLOUD_MAX_VERTICES = 60000
 
-    def _build_point_cloud_metadata(self, depth_frame, color_frame=None) -> Optional[Dict]:
+    def _build_point_cloud_metadata(self, device_id: str, depth_frame, color_frame=None) -> Optional[Dict]:
         """Compute decimated point-cloud vertices from a depth frame, ready for serialization.
 
         When ``color_frame`` is supplied and it's an RGB8/BGR8 frame, this also
@@ -1732,15 +1738,22 @@ class RealSenseManager:
         point cloud rendering. The client falls back to a depth colormap when
         ``colors`` is absent.
 
+        Uses a per-device ``rs.pointcloud`` so map_to()/calculate() can't race
+        across devices.
+
         Returns None if calculate() yields nothing. Used by both the pipeline-mode
         frame collector and the sensor-mode frame processor.
         """
+        pc = self.point_clouds.get(device_id)
+        if pc is None:
+            pc = rs.pointcloud()
+            self.point_clouds[device_id] = pc
         if color_frame:
             try:
-                self.pc.map_to(color_frame)
+                pc.map_to(color_frame)
             except Exception:
                 color_frame = None  # not all profiles support map_to; fall back silently
-        points = self.pc.calculate(depth_frame)
+        points = pc.calculate(depth_frame)
         if not points:
             return None
         verts = np.asanyarray(points.get_vertices()).view(np.float32).reshape(-1, 3)
@@ -1932,7 +1945,7 @@ class RealSenseManager:
                                 # parity). get_color_frame() returns an empty
                                 # falsy frame when no color stream is enabled.
                                 color_for_texture = frames.get_color_frame() or None
-                                pc_meta = self._build_point_cloud_metadata(frame_data, color_for_texture)
+                                pc_meta = self._build_point_cloud_metadata(device_id, frame_data, color_for_texture)
                                 if pc_meta:
                                     metadata["point_cloud"] = pc_meta
 
@@ -1985,6 +1998,8 @@ class RealSenseManager:
                             del self.metadata_queues[device_id]
                         if device_id in self.depth_frames:
                             del self.depth_frames[device_id]
+                        self.color_frames.pop(device_id, None)
+                        self.point_clouds.pop(device_id, None)
                         self._supported_md_by_profile.pop(device_id, None)
                         if device_id in self.device_infos:
                             self.device_infos[device_id].is_streaming = False
@@ -2248,7 +2263,7 @@ class RealSenseManager:
                     if self._is_color_streaming(device_id)
                     else None
                 )
-                pc_meta = self._build_point_cloud_metadata(depth_frame, color_for_texture)
+                pc_meta = self._build_point_cloud_metadata(device_id, depth_frame, color_for_texture)
                 if pc_meta:
                     metadata["point_cloud"] = pc_meta
 
@@ -2607,6 +2622,13 @@ class RealSenseManager:
                 self.sensor_rs_queues[device_id].pop(sensor_id, None)
                 if not self.sensor_rs_queues[device_id]:
                     del self.sensor_rs_queues[device_id]
+
+            if last_sensor_stopped:
+                # Free the cached color frame + per-device rs.pointcloud now
+                # that the device's depth thread is gone; otherwise the last
+                # frame stays pinned in the SDK pool until device removal.
+                self.color_frames.pop(device_id, None)
+                self.point_clouds.pop(device_id, None)
 
         # Stop the per-device metadata broadcaster once the last sensor on this
         # device has stopped.

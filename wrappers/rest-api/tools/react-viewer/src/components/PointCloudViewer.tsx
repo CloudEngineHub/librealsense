@@ -1,4 +1,4 @@
-import { useMemo, useRef, useEffect, memo } from 'react'
+import { useRef, useEffect, useLayoutEffect, memo } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import * as THREE from 'three'
@@ -19,7 +19,7 @@ const circleSprite = (() => {
 })()
 
 export function PointCloudViewer() {
-  const { pointCloudVertices, pointCloudColors, isStreaming } = useAppStore()
+  const { pointCloudVertices, pointCloudColors, isStreaming, viewMode } = useAppStore()
 
   return (
     <div className="h-full flex flex-col">
@@ -41,7 +41,7 @@ export function PointCloudViewer() {
       {/* 3D Canvas */}
       <div className="flex-1 bg-black rounded-b-lg overflow-hidden">
         {pointCloudVertices ? (
-          <Canvas>
+          <Canvas frameloop={viewMode === '3d' ? 'always' : 'never'}>
             {/* Head-on, on the depth optical axis (sensor POV) — matches the C++ viewer's
                 default 3D camera and the 2D framing, so raw-cloud edge artifacts stay
                 behind surfaces instead of reading as floating noise from an oblique angle. */}
@@ -110,15 +110,26 @@ function PointCloud({ vertices, sampledColors }: PointCloudProps) {
     return () => geo.dispose()
   }, [geometry])
 
-  useMemo(() => {
+  // useLayoutEffect rather than useMemo: this writes side effects (typed-array
+  // mutations, EMA range advance) which useMemo's contract doesn't guarantee
+  // will fire — the runtime is allowed to drop a memoized value and re-run.
+  useLayoutEffect(() => {
     const geo = geometry
     const n = vertices.length
     const count = (n / 3) | 0
 
+    // Empty frame: nothing to upload. Skip before the attribute access — the
+    // first frame may carry zero valid points (all depth pixels < 0.03m), and
+    // posAttr would be undefined here.
+    if (count === 0) {
+      geo.setDrawRange(0, 0)
+      return
+    }
+
     // Grow-only: reallocate buffers only when a frame exceeds current capacity (in vertices).
     // After the first few frames this stops firing entirely (steady state = no allocation).
     // Capacity is tracked in vertices so the float arrays stay a multiple of 3 (a fractional
-    // BufferAttribute.count makes computeBoundingSphere read past the array → NaN).
+    // BufferAttribute.count would read past the array on writes).
     if (capacityRef.current < count) {
       const vcap = count + (count >> 2) + 1 // +25% headroom to avoid frequent regrows
       geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(vcap * 3), 3))
@@ -214,14 +225,16 @@ function PointCloud({ vertices, sampledColors }: PointCloudProps) {
     }
 
     // Only the first `count` vertices are valid this frame; render exactly those.
+    // No computeBoundingSphere: it reads posAttr.count (= full grown capacity),
+    // which includes stale/zero trailing positions and inflates the sphere.
+    // frustumCulled={false} on the <points> below makes the missing sphere safe.
     posAttr.needsUpdate = true
     colAttr.needsUpdate = true
     geo.setDrawRange(0, count)
-    geo.computeBoundingSphere()
   }, [vertices, sampledColors])
 
   return (
-    <points geometry={geometry}>
+    <points geometry={geometry} frustumCulled={false}>
       <pointsMaterial
         size={3}
         sizeAttenuation={false}

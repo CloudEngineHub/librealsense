@@ -28,7 +28,6 @@ class MetadataSocketServer:
         self._stop_events: Dict[str, threading.Event] = {}
         self._lock = threading.Lock()
         self._point_cloud_throttle = max(1, point_cloud_throttle)
-        self._broadcast_count = 0
 
     def _emit_event(self, event_name, data):
         """Helper method to handle emit for both sync and async server types"""
@@ -45,6 +44,11 @@ class MetadataSocketServer:
     def _broadcast_metadata_loop(self, device_id, stop_event):
         """The core loop that fetches and broadcasts metadata."""
         print(f"[MetadataBroadcaster] Starting broadcast loop for {device_id}...")
+
+        # Per-loop counter so each device's throttle is independent — a shared
+        # instance counter would race across per-device broadcaster threads and
+        # make the point-cloud "every Nth tick" pattern non-deterministic.
+        broadcast_count = 0
 
         while not stop_event.is_set():
             start_time = time.monotonic()
@@ -63,8 +67,8 @@ class MetadataSocketServer:
                 )
                 active_streams = []
 
-            self._broadcast_count += 1
-            send_point_cloud = (self._broadcast_count % self._point_cloud_throttle) == 0
+            broadcast_count += 1
+            send_point_cloud = (broadcast_count % self._point_cloud_throttle) == 0
 
             all_metadata: Dict[str, Optional[Dict]] = {}
             if is_streaming and active_streams:

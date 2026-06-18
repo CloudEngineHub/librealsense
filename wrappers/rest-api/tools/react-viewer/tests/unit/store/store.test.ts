@@ -75,23 +75,17 @@ describe('AppStore', () => {
   })
 
   describe('View Mode', () => {
-    it('sets view mode to single', () => {
-      useAppStore.getState().setViewMode('single')
-      
-      expect(useAppStore.getState().viewMode).toBe('single')
+    it('switches to 3d', async () => {
+      await useAppStore.getState().setViewMode('3d')
+
+      expect(useAppStore.getState().viewMode).toBe('3d')
     })
 
-    it('sets view mode to pointcloud', () => {
-      useAppStore.getState().setViewMode('pointcloud')
-      
-      expect(useAppStore.getState().viewMode).toBe('pointcloud')
-    })
+    it('switches back to 2d', async () => {
+      await useAppStore.getState().setViewMode('3d')
+      await useAppStore.getState().setViewMode('2d')
 
-    it('sets view mode to grid', () => {
-      useAppStore.getState().setViewMode('single')
-      useAppStore.getState().setViewMode('grid')
-      
-      expect(useAppStore.getState().viewMode).toBe('grid')
+      expect(useAppStore.getState().viewMode).toBe('2d')
     })
   })
 

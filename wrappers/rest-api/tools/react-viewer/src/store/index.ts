@@ -19,16 +19,13 @@ import type {
 // Used to await completion before allowing a new start
 const pendingStopPromises = new Map<string, Promise<void>>()
 
-// Server sends point-cloud buffers as raw bytes over a Socket.IO binary
-// attachment (ArrayBuffer); older servers / non-binary transports fall back to
-// base64 strings. These helpers normalize both forms to typed arrays.
+// Server sends point-cloud buffers as base64 strings over Socket.IO; the
+// ArrayBuffer branch is here for a future binary-attachment transport.
 function decodeUint8Payload(raw: ArrayBuffer | string): Uint8Array {
   if (typeof raw === 'string') {
     return Uint8Array.from(atob(raw), (c) => c.charCodeAt(0))
   }
-  if (raw instanceof ArrayBuffer) return new Uint8Array(raw)
-  const view = raw as ArrayBufferLike & { byteOffset?: number; byteLength: number }
-  return new Uint8Array(view, view.byteOffset ?? 0, view.byteLength)
+  return new Uint8Array(raw)
 }
 
 function decodeFloat32Payload(raw: ArrayBuffer | string): Float32Array {
@@ -1227,7 +1224,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
         set({ pointCloudVertices: null, pointCloudColors: null })
       }
     } catch (err) {
+      // Roll back so the user can retry — otherwise viewMode is wedged at the
+      // new mode and the `prev === mode` short-circuit at the top blocks the
+      // retry click. Server may be partly-applied; the user is informed via
+      // the error message and a re-click will reissue enable/disable on all
+      // active devices.
       set({
+        viewMode: prev,
         error: `Failed to ${mode === '3d' ? 'enable' : 'disable'} point cloud: ${
           err instanceof Error ? err.message : 'Unknown error'
         }`,
