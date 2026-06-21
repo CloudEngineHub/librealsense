@@ -140,13 +140,23 @@ def find_first_device_or_exit( serial_number=None ):
     `camera_info.firmware_update_id` for devices in DFU/recovery mode (where serial_number
     isn't exposed). This mirrors how rspy.devices registers devices on discovery, so a SN
     that the harness derived from a recovery-mode device still resolves here.
+
+    DDS devices (e.g. D555) are only enumerated when DDS is enabled in the context (off by
+    default), so we enable it when running under a 'dds' context. DDS discovery is also
+    asynchronous over the network, so we poll briefly for the device to appear.
     """
+    import time
     import pyrealsense2 as rs
-    c = rs.context()
-    if not c.devices.size():  # if no device is connected we skip the test
-        log.f("No device found")
-    if serial_number:
+    from rspy.timer import Timer
+
+    # 'dds' in the run context => the rig has DDS devices; a bare context can't see them.
+    settings = { 'dds': { 'enabled': True } } if 'dds' in context else {}
+    c = rs.context( settings )
+
+    def _match():
         for d in c.devices:
+            if serial_number is None:
+                return d
             if d.supports( rs.camera_info.serial_number ):
                 d_sn = d.get_info( rs.camera_info.serial_number )
             elif d.supports( rs.camera_info.firmware_update_id ):
@@ -154,11 +164,23 @@ def find_first_device_or_exit( serial_number=None ):
             else:
                 continue
             if d_sn == serial_number:
-                log.d( 'found', d )
-                log.d( 'in', rs )
-                return d, c
+                return d
+        return None
+
+    dev = _match()
+    if dev is None and 'dds' in context:
+        # DDS discovery is asynchronous; give the device a few seconds to appear.
+        timer = Timer( 10 )
+        timer.start()
+        while dev is None and not timer.has_expired():
+            time.sleep( 1 )
+            dev = _match()
+
+    if dev is None:
+        if not c.devices.size():  # if no device is connected we skip the test
+            log.f( "No device found" )
         log.f( f"No device with serial number / firmware-update ID '{serial_number}' is visible" )
-    dev = c.devices[0]
+
     log.d( 'found', dev )
     log.d( 'in', rs )
     return dev, c

@@ -180,10 +180,12 @@ if device.is_in_recovery_mode():
         # (a fresh rs.context() needs time after rs-fw-update exits) -- up to 60s.
         log.d( "waiting for recovered device to re-enumerate in normal mode..." )
         recovered_device = None
+        # DDS devices (e.g. D555) are only enumerated when DDS is enabled in the context.
+        ctx_settings = { 'dds': { 'enabled': True } } if 'dds' in test.context else {}
         timer = Timer( 60 )
         timer.start()
         while not timer.has_expired():
-            for d in rs.context().devices:
+            for d in rs.context( ctx_settings ).devices:
                 if d.supports( rs.camera_info.firmware_update_id ) \
                    and d.get_info( rs.camera_info.firmware_update_id ) == args.serial \
                    and not d.is_in_recovery_mode():
