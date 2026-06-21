@@ -138,18 +138,23 @@ def recover_dds_device_on_golden_domain( serial ):
     """
     if 'dds' not in test.context:
         return False
-    # Look for the recovery device on the golden domain 0.
-    ctx0 = rs.context( { 'dds': { 'enabled': True, 'domain': 0 } } )
+    # Look for the recovery device on the golden domain 0. Guard the probe so a DDS hiccup can
+    # never disturb the normal discovery/recovery flow below (esp. the USB path on mixed rigs).
     recovery_found = False
-    for d in ctx0.query_devices():
-        if not d.is_in_recovery_mode():
-            continue
-        d_id = d.get_info( rs.camera_info.firmware_update_id ) \
-            if d.supports( rs.camera_info.firmware_update_id ) else None
-        if d_id == serial:
-            recovery_found = True
-            break
-    del ctx0
+    try:
+        ctx0 = rs.context( { 'dds': { 'enabled': True, 'domain': 0 } } )
+        for d in ctx0.query_devices():
+            if not d.is_in_recovery_mode():
+                continue
+            d_id = d.get_info( rs.camera_info.firmware_update_id ) \
+                if d.supports( rs.camera_info.firmware_update_id ) else None
+            if d_id == serial:
+                recovery_found = True
+                break
+        del ctx0
+    except Exception as e:
+        log.d( f"domain-0 DDS recovery probe failed ({e}); proceeding with normal discovery" )
+        return False
     if not recovery_found:
         return False
 
