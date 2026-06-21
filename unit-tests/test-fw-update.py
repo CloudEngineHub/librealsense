@@ -157,11 +157,12 @@ recovered = False
 if device.is_in_recovery_mode():
     log.d( "recovering device ..." )
     try:
-        # rs-fw-update -r requires a *signed* FW image. The caller's --custom-fw-d400
-        # is typically unsigned, so we fetch a gold signed FW from S3 to recover with.
-        gold_fw = fw_compat.download_gold_d400_fw()
+        # rs-fw-update -r needs a known-good image, which isn't always the caller's
+        # --custom-fw-<plat> path (e.g. D400 -r expects a *signed* FW, while the custom
+        # image is typically unsigned). Fetch the per-product-line gold FW to recover with.
+        gold_fw = fw_compat.download_gold_fw( product_line )
         if not gold_fw:
-            log.f( "Could not download gold signed FW; cannot recover DFU device" )
+            log.f( f"Could not download gold recovery FW for {product_line}; cannot recover DFU device" )
         cmd = [fw_updater_exe, '-r', '-f', gold_fw, '-s', args.serial]
         del device, ctx
         log.d( 'running:', cmd )

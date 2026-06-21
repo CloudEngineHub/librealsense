@@ -4,6 +4,7 @@
         "D436": "data/FW/D400/Signed_Image_UVC_5_17_3_10.bin"
     },
     "gold_recovery_fw": {
-        "D400": "https://librealsense.realsenseai.com/Releases/RS4xx/FW/D4XX_FW_Image-5.17.0.10.bin"
+        "D400": "https://librealsense.realsenseai.com/Releases/RS4xx/FW/D4XX_FW_Image-5.17.3.10.bin",
+        "D500": "https://librealsense.realsenseai.com/Releases/RS555/FW/unsigned/rvp-flash-dfu-release-7.58.38429.9662.img"
     }
 }

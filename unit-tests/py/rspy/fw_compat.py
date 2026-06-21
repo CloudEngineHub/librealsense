@@ -39,40 +39,41 @@ def _load_gold_recovery_fw_map():
     return data.get( 'gold_recovery_fw', {} )
 
 
-def download_gold_d400_fw():
-    """Return a local path to the D400 gold signed FW image.
+def download_gold_fw( product_line ):
+    """Return a local path to the gold recovery FW image for `product_line`.
 
-    Used as a recovery image for any D400 device in DFU mode; rs-fw-update's
-    recovery (-r) path only accepts signed FW, so we can't reuse the unsigned
-    --custom-fw-d400 path. The URL is configured in fw_fallback.json under
-    `gold_recovery_fw.D400` so it can be updated without touching code.
+    Used as a recovery image for any device of that product line ('D400',
+    'D500', ...) in DFU mode, since the unsigned --custom-fw-<plat> path can't
+    always be reused for recovery (rs-fw-update's -r path expects a known-good
+    image). The URL is configured in fw_fallback.json under
+    `gold_recovery_fw.<product_line>` so it can be updated without touching code.
 
     The image is cached under libci.home (persistent across reboots) and only
     re-downloaded if missing on disk. Returns the local path, or None on failure.
     """
-    url = _load_gold_recovery_fw_map().get( 'D400' )
+    url = _load_gold_recovery_fw_map().get( product_line )
     if not url:
-        log.w( "fw_fallback.json has no gold_recovery_fw.D400 entry" )
+        log.w( f"fw_fallback.json has no gold_recovery_fw.{product_line} entry" )
         return None
-    # Co-locate with the D400 fallback signed images, under libci.home.
-    cache_dir = os.path.join( libci.home, 'data', 'FW', 'D400' )
+    # Co-locate with the per-product-line fallback images, under libci.home.
+    cache_dir = os.path.join( libci.home, 'data', 'FW', product_line )
     dest = os.path.join( cache_dir, os.path.basename( url ) )
     if os.path.isfile( dest ):
-        log.d( f"gold D400 FW already cached: {dest}" )
+        log.d( f"gold {product_line} FW already cached: {dest}" )
         return dest
     try:
         os.makedirs( cache_dir, exist_ok=True )
     except OSError as e:
         log.w( f"could not create cache directory {cache_dir}: {e}" )
         return None
-    log.d( f"downloading gold D400 FW from {url}" )
+    log.d( f"downloading gold {product_line} FW from {url}" )
     try:
         with urllib.request.urlopen( url ) as response, open( dest, 'wb' ) as out_file:
             out_file.write( response.read() )
     except Exception as e:
-        log.w( f"failed to download gold D400 FW from S3: {e}" )
+        log.w( f"failed to download gold {product_line} FW: {e}" )
         return None
-    log.d( f"saved gold D400 FW to: {dest}" )
+    log.d( f"saved gold {product_line} FW to: {dest}" )
     return dest
 
 
