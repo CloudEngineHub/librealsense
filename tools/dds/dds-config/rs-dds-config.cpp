@@ -194,6 +194,7 @@ try
     cli::value< uint16_t > udp_ttl_arg( "ttl", "1-255", 1, "UDP only. Value to use in UDP packet TTL field" );
     cli::value< int > domain_id_arg( "domain-id", "0-232", 0, "DDS Domain to use in the camera (default is 0)" );
     cli::value< int > sdk_domain_id_arg( "sdk-domain-id", "0-232", 0, "DDS Domain the SDK should use (default is 0). Saved in configuration file as default for future SDK use" );
+    cli::value< int > sdk_domain_id_once_arg( "sdk-domain-id-once", "0-232", 0, "Like --sdk-domain-id but for THIS run only; NOT saved to the configuration file. Use to reach a device on a non-default domain (e.g. a camera that reverted to its golden DDS domain 0) without persisting a domain change" );
     cli::flag usb_first_arg( "usb-first", "Prioritize USB and fall back to Ethernet after link timeout" );
     cli::flag eth_first_arg( "eth-first", "Prioritize Ethernet and fall back to USB after link timeout" );
     cli::flag dynamic_priority_arg( "dynamic-priority", "Dynamically prioritize the last-working connection method (the default)" );
@@ -219,6 +220,7 @@ try
                         .arg( gateway_arg )
                         .arg( domain_id_arg )
                         .arg( sdk_domain_id_arg )
+                        .arg( sdk_domain_id_once_arg )
                         .arg( no_reset_arg )
                         .process( argc, argv );
 
@@ -247,6 +249,21 @@ try
         {
             std::cout << "-W-  FAILED to set SDK domain: " << e.what() << std::endl;
         }
+    }
+
+    // Like --sdk-domain-id, but applied only to the context we create below -- never written
+    // to the configuration file. This lets us reach a device on a non-default domain (e.g. a
+    // recovered camera that reverted to its golden DDS domain 0) without the risk of leaving a
+    // bad domain persisted if the process aborts mid-run.
+    if( sdk_domain_id_once_arg.isSet() )
+    {
+        if( sdk_domain_id_arg.isSet() )
+            throw std::invalid_argument( "--sdk-domain-id and --sdk-domain-id-once are mutually exclusive" );
+        if( sdk_domain_id_once_arg.getValue() < 0 || sdk_domain_id_once_arg.getValue() > 232 )
+            throw std::invalid_argument( "--sdk-domain-id-once must be 0-232" );
+        settings["dds"]["enabled"] = true;
+        settings["dds"]["domain"] = sdk_domain_id_once_arg.getValue();
+        INFO( "Using SDK domain " << sdk_domain_id_once_arg.getValue() << " for this run only (not saved)" );
     }
 
     if( disable_arg.isSet() )
