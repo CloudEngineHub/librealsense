@@ -15,7 +15,7 @@ import re
 import platform
 import pyrealsense2 as rs
 import pyrsutils as rsutils
-from rspy import log, test, file, repo, fw_compat
+from rspy import log, test, file, repo, fw_compat, config_file
 from rspy.timer import Timer
 import time
 import argparse
@@ -125,6 +125,69 @@ for tool in file.find( repo.build, fw_updater_exe_regex ):
 if not fw_updater_exe:
     log.f( "Could not find the update tool file (rs-fw-update.exe)" )
 
+
+def recover_dds_device_on_golden_domain( serial ):
+    """
+    A D555 bricked in DFU reverts to its golden DDS domain (0), so it does NOT appear on the
+    rig's configured domain -- our normal discovery below would miss it. The harness detects it
+    via a domain-0 fallback and passes its serial here. If a recovery device with `serial` is
+    present on domain 0: gold-flash it (on domain 0), then restore its configured DDS domain
+    with rs-dds-config using --config-transient (so nothing is written to realsense-config.json
+    and an aborted run can't leave the config on domain 0). After this the device is back on the
+    configured domain and the normal flow proceeds. Returns True if a recovery was performed.
+    """
+    if 'dds' not in test.context:
+        return False
+    # Look for the recovery device on the golden domain 0.
+    ctx0 = rs.context( { 'dds': { 'enabled': True, 'domain': 0 } } )
+    recovery_found = False
+    for d in ctx0.query_devices():
+        if not d.is_in_recovery_mode():
+            continue
+        d_id = d.get_info( rs.camera_info.firmware_update_id ) \
+            if d.supports( rs.camera_info.firmware_update_id ) else None
+        if d_id == serial:
+            recovery_found = True
+            break
+    del ctx0
+    if not recovery_found:
+        return False
+
+    log.d( f"found recovery device {serial} on golden DDS domain 0; recovering ..." )
+    gold_fw = fw_compat.download_gold_fw( "D500" )
+    if not gold_fw:
+        log.f( "Could not download gold recovery FW for D500; cannot recover DFU device" )
+    # 1) gold-flash on domain 0 (where a bricked DDS device lives)
+    cmd = [fw_updater_exe, '-r', '-f', gold_fw, '-s', serial, '--domain-id', '0']
+    log.d( 'running:', cmd )
+    subprocess.run( cmd )
+    wait_for_reboot( same_version=False )
+    # 2) the recovered camera comes back on golden domain 0; restore its configured domain
+    #    WITHOUT persisting anything (so an aborted run can't leave the SDK config on domain 0).
+    config_domain = config_file.get_domain_from_config_file_or_default()
+    if config_domain and config_domain != 0:
+        # find rs-dds-config lazily -- only needed here, to restore a recovered camera's domain
+        dds_config_exe = None
+        dds_config_exe_regex = r'(^|/)rs-dds-config'
+        if platform.system() == 'Windows':
+            dds_config_exe_regex += r'\.exe'
+        dds_config_exe_regex += '$'
+        for tool in file.find( repo.build, dds_config_exe_regex ):
+            dds_config_exe = os.path.join( repo.build, tool )
+        if not dds_config_exe:
+            log.f( "Recovered the camera but rs-dds-config was not found to restore its DDS domain" )
+        cmd = [dds_config_exe, '--serial-number', serial,
+               '--sdk-domain-id', '0', '--config-transient', '--domain-id', str( config_domain )]
+        log.d( 'running:', cmd )
+        subprocess.run( cmd )
+        wait_for_reboot( same_version=False )
+    return True
+
+
+# A bricked DDS camera reverts to golden domain 0 and won't show on the configured domain;
+# recover + restore it first so the normal discovery below succeeds.
+recovered = recover_dds_device_on_golden_domain( args.serial )
+
 device, ctx = test.find_first_device_or_exit( args.serial )
 product_line = device.get_info( rs.camera_info.product_line )
 product_name = device.get_info( rs.camera_info.name )
@@ -152,8 +215,8 @@ if not custom_fw_path:
 
 
 test.start( "Update FW" )
-# check if recovery. If so recover
-recovered = False
+# check if recovery on the configured domain (e.g. a D400 USB recovery device). If so recover.
+# (recovered may already be True from the domain-0 DDS recovery handled above.)
 if device.is_in_recovery_mode():
     log.d( "recovering device ..." )
     try:
