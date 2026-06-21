@@ -150,11 +150,19 @@ def find_first_device_or_exit( serial_number=None ):
     from rspy.timer import Timer
 
     # 'dds' in the run context => the rig has DDS devices; a bare context can't see them.
-    settings = { 'dds': { 'enabled': True } } if 'dds' in context else {}
+    dds = 'dds' in context
+    settings = { 'dds': { 'enabled': True } } if dds else {}
     c = rs.context( settings )
 
+    # A DDS device in DFU/recovery mode is a software-only device, which the default query
+    # mask (RS2_PRODUCT_LINE_ANY_INTEL) excludes -- so query sw_only too when DDS is enabled.
+    def _devices():
+        if dds:
+            return c.query_devices( int( rs.product_line.sw_only ) | int( rs.product_line.any ) )
+        return c.devices
+
     def _match():
-        for d in c.devices:
+        for d in _devices():
             if serial_number is None:
                 return d
             if d.supports( rs.camera_info.serial_number ):
@@ -168,7 +176,7 @@ def find_first_device_or_exit( serial_number=None ):
         return None
 
     dev = _match()
-    if dev is None and 'dds' in context:
+    if dev is None and dds:
         # DDS discovery is asynchronous; give the device a few seconds to appear.
         timer = Timer( 10 )
         timer.start()
@@ -177,7 +185,7 @@ def find_first_device_or_exit( serial_number=None ):
             dev = _match()
 
     if dev is None:
-        if not c.devices.size():  # if no device is connected we skip the test
+        if not _devices().size():  # if no device is connected we skip the test
             log.f( "No device found" )
         log.f( f"No device with serial number / firmware-update ID '{serial_number}' is visible" )
 

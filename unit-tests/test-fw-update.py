@@ -181,11 +181,16 @@ if device.is_in_recovery_mode():
         log.d( "waiting for recovered device to re-enumerate in normal mode..." )
         recovered_device = None
         # DDS devices (e.g. D555) are only enumerated when DDS is enabled in the context.
-        ctx_settings = { 'dds': { 'enabled': True } } if 'dds' in test.context else {}
+        is_dds = 'dds' in test.context
+        ctx_settings = { 'dds': { 'enabled': True } } if is_dds else {}
+        # sw_only so a still-recovering DDS device is visible throughout the transition.
+        query_mask = int( rs.product_line.sw_only ) | int( rs.product_line.any )
         timer = Timer( 60 )
         timer.start()
         while not timer.has_expired():
-            for d in rs.context( ctx_settings ).devices:
+            ctx = rs.context( ctx_settings )
+            devs = ctx.query_devices( query_mask ) if is_dds else ctx.devices
+            for d in devs:
                 if d.supports( rs.camera_info.firmware_update_id ) \
                    and d.get_info( rs.camera_info.firmware_update_id ) == args.serial \
                    and not d.is_in_recovery_mode():
