@@ -42,18 +42,18 @@ def _config_domain():
         return json.load( f ).get( "context", {} ).get( "dds", {} ).get( "domain" )
 
 
-def test_sdk_domain_id_once_is_not_persisted(module_device_setup):
-    """--sdk-domain-id-once must apply only to the current run and never change the config file."""
+def test_config_transient_does_not_persist(module_device_setup):
+    """--sdk-domain-id with --config-transient must apply only to the current run and never change the config file."""
     exe_path = repo.find_built_exe('tools/dds/dds-config', 'rs-dds-config')
     assert exe_path, "rs-dds-config not found"
 
     before = _config_domain()
     # Pick a domain different from the persisted one so a regression (accidental write) is visible.
-    once_domain = 1 if before != 1 else 2
+    domain = 1 if before != 1 else 2
     # --no-reset => no device change; a domain with no device may exit non-zero, which is fine:
     # the point of this test is purely that the config file is left untouched.
     subprocess.run(
-        [exe_path, '--sdk-domain-id-once', str(once_domain), '--no-reset'],
+        [exe_path, '--sdk-domain-id', str(domain), '--config-transient', '--no-reset'],
         stdout=None,
         stderr=subprocess.STDOUT,
         universal_newlines=True,
@@ -61,4 +61,4 @@ def test_sdk_domain_id_once_is_not_persisted(module_device_setup):
         check=False,
     )
     after = _config_domain()
-    assert after == before, f"--sdk-domain-id-once must not persist (config domain {before} -> {after})"
+    assert after == before, f"--config-transient must not persist (config domain {before} -> {after})"

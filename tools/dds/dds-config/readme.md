@@ -26,7 +26,7 @@ It enables the selection of the preferred connection method, whether Ethernet or
 |--gateway <1.2.3.4>|Gateway to use when DHCP is off|
 |--domain-id <0-232>|DDS Domain ID to use (default is 0), note:this is the device domain ID not librealsense domain ID|
 |--sdk-domain-id <0-232>|DDS Domain the SDK should use (default is 0). Saved in the configuration file as the default for future SDK use|
-|--sdk-domain-id-once <0-232>|Like `--sdk-domain-id` but for this run only; NOT saved to the configuration file. Use to reach a device on a non-default domain (e.g. a camera that reverted to its golden DDS domain 0) without persisting a domain change|
+|--config-transient|Apply config changes (e.g. `--sdk-domain-id`) to this run only; do NOT write them to the configuration file. Use to reach a device on a non-default domain (e.g. a camera that reverted to its golden DDS domain 0) without persisting a change|
 |--dhcp-timeout|Seconds before DHCP times out and falls back to a static IP|
 |--mtu|Size per Ethernet packet. 500-9000 in 500 byte steps|
 |--transmission-delay|Wait time after each packet is sent before sending next one. 0-144 in 3 microsecond steps|
