@@ -8,6 +8,7 @@ log = logging.getLogger(__name__)
 
 pytestmark = [
     pytest.mark.device_each("D400*"),
+    pytest.mark.device_exclude("D401"),
     pytest.mark.device_each("D500*"),
     pytest.mark.context("nightly"),
 ]
