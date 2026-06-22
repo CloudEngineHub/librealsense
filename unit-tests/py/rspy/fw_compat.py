@@ -39,41 +39,57 @@ def _load_gold_recovery_fw_map():
     return data.get( 'gold_recovery_fw', {} )
 
 
-def download_gold_fw( product_line ):
-    """Return a local path to the gold recovery FW image for `product_line`.
+def gold_recovery_key( product_line, device_name=None ):
+    """Pick the fw_fallback.json `gold_recovery_fw` key for a device.
 
-    Used as a recovery image for any device of that product line ('D400',
-    'D500', ...) in DFU mode, since the unsigned --custom-fw-<plat> path can't
-    always be reused for recovery (rs-fw-update's -r path expects a known-good
-    image). The URL is configured in fw_fallback.json under
-    `gold_recovery_fw.<product_line>` so it can be updated without touching code.
-
-    The image is cached under libci.home (persistent across reboots) and only
-    re-downloaded if missing on disk. Returns the local path, or None on failure.
+    All D400 SKUs reuse a single gold image, so D400 is keyed by the product line ('D400').
+    D500 SKUs do NOT share an image -- each (e.g. 'D555') has its own -- so D500 is keyed by
+    the SKU parsed from the device name. Returns the key, or None if it can't be determined.
     """
-    url = _load_gold_recovery_fw_map().get( product_line )
-    if not url:
-        log.w( f"fw_fallback.json has no gold_recovery_fw.{product_line} entry" )
+    if product_line == "D400":
+        return "D400"
+    m = re.search( r'D\d{3}', device_name or '' )  # e.g. "Intel RealSense D555 Recovery" -> "D555"
+    return m.group( 0 ) if m else None
+
+
+def download_gold_fw( product_line, device_name=None ):
+    """Return a local path to the gold recovery FW image for a device in DFU mode.
+
+    Used as a recovery image since the unsigned --custom-fw-<plat> path can't always be reused
+    for recovery (rs-fw-update's -r path expects a known-good image). The image is keyed by
+    gold_recovery_key() -- product line for D400 (shared), SKU for D500 -- and configured in
+    fw_fallback.json under `gold_recovery_fw.<key>` so it can be updated without touching code.
+
+    The image is cached under libci.home (persistent across reboots) and only re-downloaded if
+    missing on disk. Returns the local path, or None on failure.
+    """
+    key = gold_recovery_key( product_line, device_name )
+    if not key:
+        log.w( f"could not determine gold-FW key (product_line={product_line}, name={device_name})" )
         return None
-    # Co-locate with the per-product-line fallback images, under libci.home.
-    cache_dir = os.path.join( libci.home, 'data', 'FW', product_line )
+    url = _load_gold_recovery_fw_map().get( key )
+    if not url:
+        log.w( f"fw_fallback.json has no gold_recovery_fw.{key} entry" )
+        return None
+    # Co-locate with the per-key fallback images, under libci.home.
+    cache_dir = os.path.join( libci.home, 'data', 'FW', key )
     dest = os.path.join( cache_dir, os.path.basename( url ) )
     if os.path.isfile( dest ):
-        log.d( f"gold {product_line} FW already cached: {dest}" )
+        log.d( f"gold {key} FW already cached: {dest}" )
         return dest
     try:
         os.makedirs( cache_dir, exist_ok=True )
     except OSError as e:
         log.w( f"could not create cache directory {cache_dir}: {e}" )
         return None
-    log.d( f"downloading gold {product_line} FW from {url}" )
+    log.d( f"downloading gold {key} FW from {url}" )
     try:
         with urllib.request.urlopen( url ) as response, open( dest, 'wb' ) as out_file:
             out_file.write( response.read() )
     except Exception as e:
-        log.w( f"failed to download gold {product_line} FW: {e}" )
+        log.w( f"failed to download gold {key} FW: {e}" )
         return None
-    log.d( f"saved gold {product_line} FW to: {dest}" )
+    log.d( f"saved gold {key} FW to: {dest}" )
     return dest
 
 

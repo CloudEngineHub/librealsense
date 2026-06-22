@@ -141,6 +141,7 @@ def recover_dds_device_on_golden_domain( serial ):
     # Look for the recovery device on the golden domain 0. Guard the probe so a DDS hiccup can
     # never disturb the normal discovery/recovery flow below (esp. the USB path on mixed rigs).
     recovery_found = False
+    rec_name = None
     try:
         ctx0 = rs.context( { 'dds': { 'enabled': True, 'domain': 0 } } )
         for d in ctx0.query_devices():
@@ -150,6 +151,7 @@ def recover_dds_device_on_golden_domain( serial ):
                 if d.supports( rs.camera_info.firmware_update_id ) else None
             if d_id == serial:
                 recovery_found = True
+                rec_name = d.get_info( rs.camera_info.name ) if d.supports( rs.camera_info.name ) else None
                 break
         del ctx0
     except Exception as e:
@@ -158,8 +160,8 @@ def recover_dds_device_on_golden_domain( serial ):
     if not recovery_found:
         return False
 
-    log.d( f"found recovery device {serial} on golden DDS domain 0; recovering ..." )
-    gold_fw = fw_compat.download_gold_fw( "D500" )
+    log.d( f"found recovery device {serial} ({rec_name}) on golden DDS domain 0; recovering ..." )
+    gold_fw = fw_compat.download_gold_fw( "D500", rec_name )
     if not gold_fw:
         log.f( "Could not download gold recovery FW for D500; cannot recover DFU device" )
     # 1) gold-flash on domain 0 (where a bricked DDS device lives)
@@ -228,9 +230,9 @@ if device.is_in_recovery_mode():
         # rs-fw-update -r needs a known-good image, which isn't always the caller's
         # --custom-fw-<plat> path (e.g. D400 -r expects a *signed* FW, while the custom
         # image is typically unsigned). Fetch the per-product-line gold FW to recover with.
-        gold_fw = fw_compat.download_gold_fw( product_line )
+        gold_fw = fw_compat.download_gold_fw( product_line, product_name )
         if not gold_fw:
-            log.f( f"Could not download gold recovery FW for {product_line}; cannot recover DFU device" )
+            log.f( f"Could not download gold recovery FW for {product_name}; cannot recover DFU device" )
         cmd = [fw_updater_exe, '-r', '-f', gold_fw, '-s', args.serial]
         del device, ctx
         log.d( 'running:', cmd )
