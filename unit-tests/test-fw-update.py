@@ -163,7 +163,8 @@ def recover_dds_device_on_golden_domain( serial ):
     log.d( f"found recovery device {serial} ({rec_name}) on golden DDS domain 0; recovering ..." )
     gold_fw = fw_compat.download_gold_fw( "D500", rec_name )
     if not gold_fw:
-        log.f( "Could not download gold recovery FW for D500; cannot recover DFU device" )
+        log.f( f"Could not download gold recovery FW for {rec_name} ({serial}); cannot recover DFU device" )
+        return False  # defensive: log.f normally exits; never build a -f command with gold_fw=None
     # 1) gold-flash on domain 0 (where a bricked DDS device lives)
     cmd = [fw_updater_exe, '-r', '-f', gold_fw, '-s', serial, '--domain-id', '0']
     log.d( 'running:', cmd )
@@ -233,6 +234,7 @@ if device.is_in_recovery_mode():
         gold_fw = fw_compat.download_gold_fw( product_line, product_name )
         if not gold_fw:
             log.f( f"Could not download gold recovery FW for {product_name}; cannot recover DFU device" )
+            sys.exit( 1 )  # defensive: log.f normally exits; never build a -f command with gold_fw=None
         cmd = [fw_updater_exe, '-r', '-f', gold_fw, '-s', args.serial]
         del device, ctx
         log.d( 'running:', cmd )

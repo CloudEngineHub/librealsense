@@ -62,6 +62,10 @@ def download_gold_fw( product_line, device_name=None ):
     gold_recovery_key() -- product line for D400 (shared), SKU for D500 -- and configured in
     fw_fallback.json under `gold_recovery_fw.<key>` so it can be updated without touching code.
 
+    Note on signing: the D400 gold is a signed release; D500/D555 FW is unsigned-only (there is
+    no signed variant and `-u` is not supported for D555), and rs-fw-update's -r path accepts
+    the unsigned .img -- verified by recovering a real D555 on-device.
+
     The image is cached under libci.home (persistent across reboots) and only re-downloaded if
     missing on disk. Returns the local path, or None on failure.
     """
@@ -86,10 +90,22 @@ def download_gold_fw( product_line, device_name=None ):
         return None
     log.d( f"downloading gold {key} FW from {url}" )
     try:
-        with urllib.request.urlopen( url ) as response, open( dest, 'wb' ) as out_file:
-            out_file.write( response.read() )
+        with urllib.request.urlopen( url, timeout=120 ) as response:  # don't hang CI forever
+            content = response.read()
     except Exception as e:
         log.w( f"failed to download gold {key} FW: {e}" )
+        return None
+    # Sanity-check before caching: a real gold FW image is well over 512 KB, so a tiny payload
+    # (an HTML error page, a redirect body, or a truncated transfer) means a bad download that
+    # we must not cache and hand to rs-fw-update.
+    if len( content ) < 512 * 1024:
+        log.w( f"downloaded gold {key} FW is suspiciously small ({len( content )} bytes); discarding" )
+        return None
+    try:
+        with open( dest, 'wb' ) as out_file:
+            out_file.write( content )
+    except OSError as e:
+        log.w( f"could not write gold {key} FW to {dest}: {e}" )
         return None
     log.d( f"saved gold {key} FW to: {dest}" )
     return dest
