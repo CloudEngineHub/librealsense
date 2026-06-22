@@ -1,12 +1,14 @@
 // License: Apache 2.0. See LICENSE file in root directory.
-// Copyright(c) 2024 RealSense, Inc. All Rights Reserved.
+// Copyright(c) 2026 RealSense, Inc. All Rights Reserved.
 
 #pragma once
 
 #include "d500-device.h"
 #include "stream.h"
+#include <src/platform/stream-profile.h>
 
 #include <memory>
+#include <vector>
 
 
 namespace librealsense
@@ -20,5 +22,13 @@ namespace librealsense
     protected:
         std::shared_ptr< stream_interface > _color_stream_1;
         std::shared_ptr< stream_interface > _color_stream_2;
+
+    private:
+        void register_color_extrinsics();
+
+        // Stream-id resolver: route each M420 color pin to Color 1 / Color 2 in ascending pin order.
+        static void resolve_color_stream( const std::vector< platform::stream_profile > & all,
+                                          const platform::stream_profile & p, rs2_stream & type, int & index );
+        static bool is_color_pin( const std::vector< platform::stream_profile > & all, uint32_t pin );
     };
 }

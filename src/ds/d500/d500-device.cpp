@@ -226,15 +226,21 @@ namespace librealsense
             else
             {
                 // Streams contributed by feature mixins (e.g. dual-RGB color), matched by stream type + index.
+                bool matched = false;
                 for (auto&& extra : _extra_streams)
                 {
                     if (extra->get_stream_type() == p->get_stream_type() &&
                         extra->get_stream_index() == p->get_stream_index())
                     {
                         assign_stream(extra, p);
+                        matched = true;
                         break;
                     }
                 }
+                if (!matched)
+                    LOG_WARNING("d500_depth_sensor: no registered stream for profile type="
+                        << p->get_stream_type() << " index=" << p->get_stream_index()
+                        << " - profile left unassigned");
             }
             auto&& vid_profile = dynamic_cast<video_stream_profile_interface*>(p.get());
 
