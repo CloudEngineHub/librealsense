@@ -3,6 +3,7 @@
 
 import asyncio
 import platform
+import struct
 import threading
 import time
 import logging
@@ -72,9 +73,10 @@ class RealSenseManager:
         # Store latest raw depth frames for pixel depth queries
         self.depth_frames: Dict[str, Any] = {}  # device_id -> rs.depth_frame
 
-        # Cache of supported frame_metadata values per stream profile uid.
+        # Cache of supported frame_metadata values keyed by device_id then profile uid.
+        # Nested so a single device's profiles can be evicted without wiping others.
         # Avoids re-probing every metadata key on every frame in the hot loop.
-        self._supported_md_by_profile: Dict[int, list] = {}
+        self._supported_md_by_profile: Dict[str, Dict[int, list]] = {}
 
         # Firmware update tracking (one update at a time per device)
         self._fw_updates_in_progress: Set[str] = set()
@@ -113,27 +115,25 @@ class RealSenseManager:
     def _on_devices_changed(self, info) -> None:
         """rs.context devices-changed callback. Runs on a pyrealsense2 internal thread."""
         added: List[str] = []
-        for dev in info.get_new_devices():
-            if dev.supports(rs.camera_info.serial_number):
-                added.append(dev.get_info(rs.camera_info.serial_number))
-
         removed: List[str] = []
         with self.lock:
+            new_devs = list(info.get_new_devices())
             for serial, dev in list(self.devices.items()):
                 if info.was_removed(dev):
                     removed.append(serial)
-            # Drop cached devices so the next /devices call re-enumerates.
-            self.device_infos.clear()
             for serial in removed:
                 self._remove_device(serial)
-            self._supported_md_by_profile.clear()
+            for dev in new_devs:
+                serial = self._register_new_device(dev)
+                if serial is not None:
+                    added.append(serial)
 
         for serial in removed:
             self.metadata_socket_server.stop_broadcast(serial)
 
         if added or removed:
             logging.info("devices_changed: +%s -%s", added, removed)
-        self._emit_socket_event("devices_changed", {"added": added, "removed": removed})
+            self._emit_socket_event("devices_changed", {"added": added, "removed": removed})
 
     def _remove_device(self, serial: str) -> None:
         assert self.lock.locked(), "_remove_device called without self.lock held"
@@ -144,7 +144,60 @@ class RealSenseManager:
         self.metadata_queues.pop(serial, None)
         self.depth_frames.pop(serial, None)
         self.devices.pop(serial, None)
+        self.device_infos.pop(serial, None)
+        self._supported_md_by_profile.pop(serial, None)
         self.streaming_mode.pop(serial, None)
+
+    def _register_new_device(self, dev: rs.device) -> Optional[str]:
+        """Cache a freshly-discovered rs.device + its DeviceInfo. Caller must hold self.lock."""
+        assert self.lock.locked(), "_register_new_device called without self.lock held"
+        if not dev.supports(rs.camera_info.serial_number):
+            return None
+        device_id = dev.get_info(rs.camera_info.serial_number)
+
+        if device_id in self.devices:
+            return None
+
+        def _info(key, default=None):
+            try:
+                return dev.get_info(key)
+            except RuntimeError:
+                return default
+
+        sensors: List[str] = [
+            sensor.get_info(rs.camera_info.name)
+            for sensor in dev.sensors
+            if sensor.supports(rs.camera_info.name)
+        ]
+
+        metadata_enabled: Optional[bool] = None
+        if _IS_WINDOWS:
+            try:
+                metadata_enabled = dev.is_metadata_enabled()
+            except RuntimeError:
+                pass
+
+        info = DeviceInfo(
+            device_id=device_id,
+            name=_info(rs.camera_info.name, "Unknown Device"),
+            serial_number=device_id,
+            firmware_version=_info(rs.camera_info.firmware_version),
+            recommended_firmware_version=None,
+            firmware_status=FW_STATUS_UNKNOWN,
+            firmware_file_available=False,
+            physical_port=_info(rs.camera_info.physical_port),
+            usb_type=_info(rs.camera_info.usb_type_descriptor),
+            product_id=_info(rs.camera_info.product_id),
+            sensors=sensors,
+            is_streaming=device_id in self.pipelines,
+            metadata_enabled=metadata_enabled,
+        )
+        # Publish atomically at the end — if anything above raises, no partial
+        # cache entry is left behind. Keep new work above this block.
+        self.devices[device_id] = dev
+        self.device_infos[device_id] = info
+        self.streaming_mode.setdefault(device_id, "idle")
+        return device_id
 
     def _emit_socket_event(self, event: str, payload: Dict[str, Any]) -> None:
         """Emit a Socket.IO event from sync contexts using the main FastAPI event loop."""
@@ -183,93 +236,11 @@ class RealSenseManager:
             for device_id in list(self.devices.keys()):
                 if device_id not in self.pipelines:
                     del self.devices[device_id]
-                    if device_id in self.device_infos:
-                        del self.device_infos[device_id]
+                    self.device_infos.pop(device_id, None)
+                    self._supported_md_by_profile.pop(device_id, None)
 
-            # Discover connected devices
             for dev in self.ctx.devices:
-                # Try to get device serial number - skip devices that don't support it
-                # (e.g., devices in DFU/update mode)
-                try:
-                    if not dev.supports(rs.camera_info.serial_number):
-                        logging.debug("Skipping device without serial number support (likely in DFU mode)")
-                        continue
-                    device_id = dev.get_info(rs.camera_info.serial_number)
-                except RuntimeError as e:
-                    logging.debug("Skipping device that doesn't support serial number: %s", e)
-                    continue
-
-                # Skip already known devices
-                if device_id in self.devices:
-                    continue
-
-                self.devices[device_id] = dev
-
-                # Extract device information
-                try:
-                    name = dev.get_info(rs.camera_info.name)
-                except RuntimeError:
-                    name = "Unknown Device"
-
-                try:
-                    firmware_version = dev.get_info(rs.camera_info.firmware_version)
-                except RuntimeError:
-                    firmware_version = None
-
-                # Bundled firmware support was removed; we no longer compare against a recommended version.
-                recommended_version = None
-                fw_file_exists = False
-                firmware_status = FW_STATUS_UNKNOWN
-
-                try:
-                    physical_port = dev.get_info(rs.camera_info.physical_port)
-                except RuntimeError:
-                    physical_port = None
-
-                try:
-                    usb_type = dev.get_info(rs.camera_info.usb_type_descriptor)
-                except RuntimeError:
-                    usb_type = None
-
-                try:
-                    product_id = dev.get_info(rs.camera_info.product_id)
-                except RuntimeError:
-                    product_id = None
-
-                # Get sensors
-                sensors = []
-                for sensor in dev.sensors:
-                    try:
-                        sensor_name = sensor.get_info(rs.camera_info.name)
-                        sensors.append(sensor_name)
-                    except RuntimeError:
-                        pass
-
-                metadata_enabled: Optional[bool] = None  # None on non-Windows / unsupported devices
-                if _IS_WINDOWS:
-                    try:
-                        metadata_enabled = dev.is_metadata_enabled()
-                    except RuntimeError:
-                        pass
-
-                # Create device info object
-                device_info = DeviceInfo(
-                    device_id=device_id,
-                    name=name,
-                    serial_number=device_id,
-                    firmware_version=firmware_version,
-                    recommended_firmware_version=recommended_version,
-                    firmware_status=firmware_status,
-                    firmware_file_available=fw_file_exists,
-                    physical_port=physical_port,
-                    usb_type=usb_type,
-                    product_id=product_id,
-                    sensors=sensors,
-                    is_streaming=device_id in self.pipelines,
-                    metadata_enabled=metadata_enabled,
-                )
-
-                self.device_infos[device_id] = device_info
+                self._register_new_device(dev)
 
             # Update cache timestamp after a successful refresh
             import time
@@ -385,9 +356,6 @@ class RealSenseManager:
                 # and the post-DFU device-back event would never reach us.
                 update_dev = None
                 target_dev = None
-                with self.lock:
-                    self.devices.clear()
-                    self.device_infos.clear()
 
                 self._wait_for_device_reconnect(device_id, firmware_update_id)
             except RealSenseError:
@@ -557,8 +525,10 @@ class RealSenseManager:
 
         # Cached refs will become invalid after enter_update_state.
         with self.lock:
-            self.devices.pop(device_id, None)
-            self.device_infos.pop(device_id, None)
+            self._remove_device(device_id)
+        self._emit_socket_event(
+            "devices_changed", {"added": [], "removed": [device_id]},
+        )
 
         logging.info("Requesting device to enter DFU mode...")
         updatable.enter_update_state()
@@ -1505,7 +1475,7 @@ class RealSenseManager:
                     self.pipeline_signatures.pop(device_id, None)
                     self.frame_queues.pop(device_id, None)
                     self.metadata_queues.pop(device_id, None)
-                    self._supported_md_by_profile.clear()
+                    self._supported_md_by_profile.pop(device_id, None)
                     self.stopping.discard(device_id)
                     # Reset streaming mode to idle
                     self.streaming_mode[device_id] = "idle"
@@ -1711,24 +1681,27 @@ class RealSenseManager:
             pass
         return info
 
-    def _get_frame_metadata(self, frame_data) -> Dict[str, int]:
+    def _get_frame_metadata(self, frame_data, device_id: str) -> Dict[str, int]:
         """Return all rs2_frame_metadata_value attributes the frame supports.
         Mirrors common/stream-model.cpp:52-59 in the C++ realsense-viewer.
-        Caches the supported subset per stream profile uid so the steady-state
+        Caches the supported subset per (device, profile uid) so the steady-state
         per-frame cost is one dict lookup + N get_frame_metadata calls."""
         try:
             profile_uid = frame_data.get_profile().unique_id()
         except Exception:
             profile_uid = None
 
-        supported = self._supported_md_by_profile.get(profile_uid) if profile_uid is not None else None
+        device_cache = self._supported_md_by_profile.get(device_id)
+        supported = device_cache.get(profile_uid) if (device_cache is not None and profile_uid is not None) else None
         # Build the supported set from the 2nd frame on: delta-computed metadata
         # (e.g. actual_fps) is not yet available on the first frame.
         if supported is None and frame_data.get_frame_number() >= 2:
             supported = [md for md in self._FRAME_METADATA_VALUES
                          if frame_data.supports_frame_metadata(md)]
             if profile_uid is not None:
-                self._supported_md_by_profile[profile_uid] = supported
+                if device_cache is None:
+                    device_cache = self._supported_md_by_profile[device_id] = {}
+                device_cache[profile_uid] = supported
 
         attrs: Dict[str, int] = {}
         for md in (supported or []):
@@ -1835,7 +1808,7 @@ class RealSenseManager:
 
                             # Add metadata
                             metadata = {
-                                "frame_metadata": self._get_frame_metadata(frame_data),
+                                "frame_metadata": self._get_frame_metadata(frame_data, device_id),
                                 **self._build_viewer_info(frame_data),
                             }
 
@@ -1898,7 +1871,7 @@ class RealSenseManager:
                             del self.metadata_queues[device_id]
                         if device_id in self.depth_frames:
                             del self.depth_frames[device_id]
-                        self._supported_md_by_profile.clear()
+                        self._supported_md_by_profile.pop(device_id, None)
                         if device_id in self.device_infos:
                             self.device_infos[device_id].is_streaming = False
             except Exception:
@@ -2139,7 +2112,7 @@ class RealSenseManager:
         processed_frame = None
         info_source = frame  # frame to read info from after post processing is done
         metadata: dict = {
-            "frame_metadata": self._get_frame_metadata(frame),
+            "frame_metadata": self._get_frame_metadata(frame, device_id),
         }
 
         if "depth" in frame_stream_name:
@@ -2766,7 +2739,25 @@ class RealSenseManager:
         try:
             cmd = debug.build_command(opcode, param1, param2, param3, param4, payload)
             raw_response = debug.send_and_receive_raw_data(cmd)
-            return list(raw_response)
+            response_bytes = list(raw_response)
+
+            # The raw response starts with a 4-byte little-endian uint32 that echoes
+            # the sent opcode on success or contains a firmware error code on failure.
+            # send_and_receive_raw_data does not raise on firmware-level errors, so we
+            # must inspect the opcode ourselves.
+            if len(response_bytes) < 4:
+                raise RealSenseError(
+                    status_code=500, detail="HWM command failed: response too short"
+                )
+            response_opcode, = struct.unpack_from('<I', bytes(response_bytes[:4]))
+            if response_opcode != opcode:
+                raise RealSenseError(
+                    status_code=500,
+                    detail=f"HWM command failed: firmware returned error code 0x{response_opcode:08X} (expected opcode echo 0x{opcode:08X})",
+                )
+            return response_bytes
+        except RealSenseError:
+            raise
         except Exception as e:
             raise RealSenseError(
                 status_code=500, detail=f"HWM command failed: {e}"

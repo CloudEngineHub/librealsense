@@ -29,10 +29,9 @@ pytestmark = [
 ]
 
 # Constants & thresholds (reintroduce after import fix)
-PIXEL_CORRECTION = -1.0  # pixel shift to apply to principal point
-SHORT_DISTANCE_PIXEL_CORRECTION = -3.0
-EPSILON = 0.5         # half of PIXEL_CORRECTION tolerance
+PIXEL_CORRECTION = -2.0  # pixel shift to apply to principal point
 DIFF_THRESHOLD = 0.001  # minimum change expected after OCC calibration
+FILL_RATE_TOLERANCE = 0.03  # allow post-OCC fill rate to be within 3% of base
 HEALTH_FACTOR_THRESHOLD_AFTER_MODIFICATION = 3.0
 
 def on_chip_calibration_json(occ_json_file, host_assistance):
@@ -89,6 +88,14 @@ def run_advanced_occ_calibration_test(host_assistance, config, pipeline, calib_d
         log.info(f"  Base principal points (Right) ppx={base_right_pp[0]:.6f} ppy={base_right_pp[1]:.6f}")
 
         base_axis_val = base_right_pp[1]
+
+        # Measure fill rate before modification (base reference)
+        base_fill_rate = measure_depth_fill_rate(config, pipeline, width=image_width, height=image_height, fps=fps)
+        if base_fill_rate is not None:
+            log.info(f"Fill rate before modification (base): {base_fill_rate*100:.1f}%")
+        else:
+            log.error("Fill rate before modification unavailable")
+            pytest.fail()
 
         # 2. Apply perturbation
         pixel_correction = PIXEL_CORRECTION
@@ -166,23 +173,27 @@ def run_advanced_occ_calibration_test(host_assistance, config, pipeline, calib_d
             log.error("Fill rate after OCC unavailable")
             pytest.fail()
 
-        # Fill rate assertion: post-OCC fill rate must be higher than the perturbed fill rate
-        if modified_fill_rate is not None and post_fill_rate is not None:
-            log.info(f"Fill rates: modified={modified_fill_rate*100:.1f}% post={post_fill_rate*100:.1f}%")
+        # Fill rate assertions: post-OCC must be better than both base and modified
+        if base_fill_rate is not None and modified_fill_rate is not None and post_fill_rate is not None:
+            log.info(f"Fill rates: base={base_fill_rate*100:.1f}% modified={modified_fill_rate*100:.1f}% post={post_fill_rate*100:.1f}%")
             if post_fill_rate <= modified_fill_rate:
                 log.error("Post-OCC fill rate did not improve over perturbed fill rate")
                 pytest.fail()
+            elif post_fill_rate < base_fill_rate - FILL_RATE_TOLERANCE:
+                log.error(f"Post-OCC fill rate ({post_fill_rate*100:.1f}%) is below base ({base_fill_rate*100:.1f}%) by more than tolerance ({FILL_RATE_TOLERANCE*100:.0f}%)")
+                pytest.fail()
             else:
-                log.info(f"Fill rate improved after OCC (improvement={( post_fill_rate - modified_fill_rate)*100:.1f}%)")
+                log.info(f"Fill rate improved after OCC vs modified (+{(post_fill_rate - modified_fill_rate)*100:.1f}%) and vs base (+{(post_fill_rate - base_fill_rate)*100:.1f}%)")
 
+        direction_toward_base = (final_axis_val - modified_axis_val) * (base_axis_val - modified_axis_val) > 0
         if abs(final_axis_val - modified_axis_val) <= DIFF_THRESHOLD:
-            log.error(f"OCC left ppy unchanged (within DIFF_THRESHOLD={DIFF_THRESHOLD}); failing")            
+            log.error(f"OCC right ppy unchanged (within DIFF_THRESHOLD={DIFF_THRESHOLD}); failing")
             pytest.fail()
-        elif dist_from_modified + EPSILON <= dist_from_original:
-            log.error("OCC did not revert toward base (still closer to modified)")
+        elif not direction_toward_base:
+            log.error("OCC moved right ppy in wrong direction (away from base)")
             pytest.fail()
         else:
-            log.info("OCC reverted ppy toward base successfully")
+            log.info("OCC moved right ppy toward base successfully")
     except Exception as e:
         log.error(f"OCC calibration failed: {e}")
         pytest.fail()

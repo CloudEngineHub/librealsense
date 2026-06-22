@@ -558,7 +558,7 @@ void dds_sensor_proxy::handle_inference_data( realdds::topics::string_msg && msg
     auto * payload = reinterpret_cast< object_detection_frame::object_detection_payload * >( new_frame->data.data() );
 
     // Fill payload fields
-    payload->timestamp = new_frame->additional_data.timestamp * MILLISEC_TO_SECONDS;
+    payload->timestamp_ms = new_frame->additional_data.timestamp;
     payload->frame_id = new_frame->additional_data.frame_number;
     payload->number_of_detections = n_detections;
     payload->source = static_cast< uint8_t >( object_detection_frame::source::RGB ); // Currently only RGB is supported.

@@ -39,22 +39,43 @@ std::shared_ptr< matcher > matcher_factory::create( rs2_matchers matcher,
 
 std::shared_ptr< matcher > matcher_factory::create_DLR_C_matcher( std::vector< stream_interface * > const & profiles )
 {
-    auto color = get_color_profiles( profiles );
+    auto infer = get_inference_profiles( profiles );
+
+    std::vector< stream_interface * > synchronized_profiles;
+    synchronized_profiles.reserve( profiles.size() );
+    for( auto & profile : profiles )
+    {
+        if( profile->get_stream_type() != RS2_STREAM_OBJECT_DETECTION )
+            synchronized_profiles.push_back( profile );
+    }
+
+    auto color = get_color_profiles( synchronized_profiles );
     if( color.empty() )
     {
         LOG_DEBUG( "Created default matcher" );
-        return create_timestamp_matcher( profiles );
+        auto sync_matcher = create_timestamp_matcher( synchronized_profiles );
+        if( infer.empty() )
+            return sync_matcher;
+
+        std::vector< std::shared_ptr< matcher > > matchers;
+        if( ! synchronized_profiles.empty() )
+            matchers.push_back( sync_matcher );
+        for( auto & profile : infer )
+            matchers.push_back( create_identity_matcher( profile ) );
+
+        return std::make_shared< composite_identity_matcher >( matchers );
     }
 
-    auto infer = get_inference_profiles( profiles );
-    if( ! infer.empty() )
-    {
-        return create_timestamp_composite_matcher( { create_DLR_matcher( profiles ),
-                                                     create_color_composite_matcher( color ),
-                                                     create_identity_matcher( infer ) } );
-    }
+    auto sync_matcher = create_timestamp_composite_matcher(
+        { create_DLR_matcher( synchronized_profiles ), create_color_composite_matcher( color ) } );
+    if( infer.empty() )
+        return sync_matcher;
 
-    return create_timestamp_composite_matcher( { create_DLR_matcher( profiles ), create_color_composite_matcher( color ) } );
+    std::vector< std::shared_ptr< matcher > > matchers = { sync_matcher };
+    for( auto & profile : infer )
+        matchers.push_back( create_identity_matcher( profile ) );
+
+    return std::make_shared< composite_identity_matcher >( matchers );
 }
 
 
@@ -104,11 +125,11 @@ std::shared_ptr< matcher > matcher_factory::create_DIC_matcher( std::vector< str
 {
     std::vector< std::shared_ptr< matcher > > matchers;
     if( auto depth = find_profile( RS2_STREAM_DEPTH, -1, profiles ) )
-        matchers.push_back( create_identity_matcher( { depth } ) );
+        matchers.push_back( create_identity_matcher( depth ) );
     if( auto ir = find_profile( RS2_STREAM_INFRARED, -1, profiles ) )
-        matchers.push_back( create_identity_matcher( { ir } ) );
+        matchers.push_back( create_identity_matcher( ir ) );
     if( auto confidence = find_profile( RS2_STREAM_CONFIDENCE, -1, profiles ) )
-        matchers.push_back( create_identity_matcher( { confidence } ) );
+        matchers.push_back( create_identity_matcher( confidence ) );
 
     if( matchers.empty() )
     {
@@ -154,14 +175,9 @@ matcher_factory::create_timestamp_matcher( std::vector< stream_interface * > con
 }
 
 
-std::shared_ptr< matcher >
-matcher_factory::create_identity_matcher( std::vector< stream_interface * > const & profiles )
+std::shared_ptr< matcher > matcher_factory::create_identity_matcher( stream_interface * profile )
 {
-    std::vector< std::shared_ptr< matcher > > matchers;
-    for( auto & p : profiles )
-        matchers.push_back( std::make_shared< identity_matcher >( p->get_unique_id(), p->get_stream_type() ) );
-
-    return std::make_shared< composite_identity_matcher >( matchers );
+    return std::make_shared< identity_matcher >( profile->get_unique_id(), profile->get_stream_type() );
 }
 
 std::shared_ptr< matcher >

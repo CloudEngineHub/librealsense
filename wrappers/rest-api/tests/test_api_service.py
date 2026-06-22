@@ -511,8 +511,8 @@ class TestRealSenseAPI:
         body = response.json()
         assert body["device_id"] == "device1"
         assert isinstance(body["response"], list)
-        # Mock returns 4-byte STATUS_OK
-        assert body["response"] == [0, 0, 0, 0]
+        # Mock echoes opcode (0xA6 = 166) as little-endian uint32 in the first 4 bytes.
+        assert body["response"] == [0xA6, 0, 0, 0]
 
     def test_hwm_command_with_params(self, setup_mock_managers):
         """Params and data payload are accepted without error."""
@@ -545,8 +545,8 @@ class TestRealSenseAPI:
         from .pyrealsense_mock import device as MockDevice
         rs_manager = setup_mock_managers["rs_manager"]
 
-        # Inject a device that does NOT support debug_protocol
-        no_debug_device = MockDevice(serial_number="no-debug", name="Limited Device", supports_debug=False)
+        # Plain device (not a debug_protocol subclass) does not expose the extension.
+        no_debug_device = MockDevice(serial_number="no-debug", name="Limited Device")
         rs_manager.devices["no-debug"] = no_debug_device
 
         response = client.post(
@@ -555,6 +555,48 @@ class TestRealSenseAPI:
         )
         assert response.status_code == 400
         assert "does not support" in response.json()["detail"].lower()
+
+    def test_hwm_firmware_error(self, setup_mock_managers):
+        """When firmware echoes back a non-matching opcode the endpoint returns 500."""
+        from .pyrealsense_mock import debug_protocol as MockDebugDevice
+        rs_manager = setup_mock_managers["rs_manager"]
+
+        # fw_error_code differs from opcode 0xA6 so the opcode check must fire.
+        error_device = MockDebugDevice(
+            serial_number="fw-error",
+            name="Error Device",
+            fw_error_code=0x00000009,
+        )
+        rs_manager.devices["fw-error"] = error_device
+
+        response = client.post(
+            "/api/v1/devices/fw-error/hwm",
+            json={"opcode": 0xA6},
+        )
+        assert response.status_code == 500
+        detail = response.json()["detail"]
+        assert "error code" in detail.lower()
+        assert "0x00000009" in detail  # returned error code
+        assert "0x000000A6" in detail  # expected opcode echo
+
+    def test_hwm_response_too_short(self, setup_mock_managers):
+        """When the firmware response is shorter than 4 bytes the endpoint returns 500."""
+        from .pyrealsense_mock import debug_protocol as MockDebugDevice
+        rs_manager = setup_mock_managers["rs_manager"]
+
+        short_device = MockDebugDevice(
+            serial_number="short-resp",
+            name="Short Response Device",
+            short_hwm_response=True,
+        )
+        rs_manager.devices["short-resp"] = short_device
+
+        response = client.post(
+            "/api/v1/devices/short-resp/hwm",
+            json={"opcode": 0xA6},
+        )
+        assert response.status_code == 500
+        assert "too short" in response.json()["detail"].lower()
 
     def test_hwm_no_deadlock_on_unknown_device(self, patch_dependencies):
         """send_hwm_command must not deadlock when the device is absent and refresh_devices is called.

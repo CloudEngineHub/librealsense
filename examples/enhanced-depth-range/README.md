@@ -60,6 +60,8 @@ Everything installs to `/opt/librealsense2-enhanced-depth/`. No venv needed — 
 The deb depends on `librealsense2` (≥ matching version) — install both from the
 same Artifactory / apt source so the SONAMEs line up.
 
+> Stay tuned: Details about how to get the package will be shared soon.
+
 ---
 
 ## RealSense Viewer: Improved Close Range Depth Post-Processing Filter
@@ -143,11 +145,8 @@ Both expose `pkg-config` files, so the simplest one-line build is:
 ```bash
 g++ -std=c++17 range_depth.cpp \
     -I/opt/librealsense2-enhanced-depth/include \
-    -L/opt/librealsense2-enhanced-depth/lib \
-    -lrs_depth_range \
-    -Wl,-rpath,/opt/librealsense2-enhanced-depth/lib \
     $(pkg-config --cflags --libs realsense2) \
-    -o range_depth
+    -ldl -o range_depth
 
 ./range_depth
 ```
