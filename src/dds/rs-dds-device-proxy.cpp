@@ -694,10 +694,7 @@ void dds_device_proxy::tag_profiles( stream_profiles profiles ) const
 void dds_device_proxy::hardware_reset()
 {
     json control = json::object( { { realdds::topics::control::key::id, realdds::topics::control::hw_reset::id } } );
-    // RSDEV-11519: do not wait for a reply. The device may tear down its DDS entities and reset before
-    // the hw-reset reply is delivered, so requiring one raises a spurious "timeout waiting for reply"
-    // even though the reset succeeded. The control is still written reliably; the authoritative success
-    // signal is the device disconnection event, which callers observe via the devices-changed callback.
+    // don't wait for a reply - the device may reset before the reply is delivered
     _dds_dev->send_control( control );
 }
 
