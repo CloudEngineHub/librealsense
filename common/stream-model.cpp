@@ -459,8 +459,12 @@ namespace rs2
                 label = tooltip;
             else
             {
-                // Use only the SKU type for compact representation and use only the last three digits for S.N
-                auto short_name = split_string(dev_name, ' ').back();
+                // Use only the SKU type for compact representation and use only the last three digits for S.N.
+                // The SKU is the model token right after "RealSense" (e.g. D435, D585S), not the last word -
+                // e.g. "RealSense D585 Proto Dual RGB" should yield "D585", not "RGB".
+                const std::string prefix = "RealSense ";
+                std::string after_prefix = dev_name.substr( dev_name.find( prefix ) + prefix.size() );
+                auto short_name = split_string( after_prefix, ' ' ).front();
                 auto short_sn = dev_serial;
                 short_sn.erase(0, dev_serial.size() - 5).replace(0, 2, "..");
 
