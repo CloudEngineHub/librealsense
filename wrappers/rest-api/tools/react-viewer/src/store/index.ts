@@ -483,17 +483,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
   resetDevice: async (deviceId) => {
     try {
       await apiClient.resetDevice(deviceId)
-      // Remove device state
-      set((state) => {
-        const newStates = { ...state.deviceStates }
-        delete newStates[deviceId]
-        return {
-          deviceStates: newStates,
-          selectedDevice: state.selectedDevice?.device_id === deviceId ? null : state.selectedDevice
-        }
-      })
-      // Refresh device list after reset
-      setTimeout(() => get().fetchDevices(), 2000)
     } catch (error) {
       set({
         error: `Failed to reset device: ${error instanceof Error ? error.message : 'Unknown error'}`,

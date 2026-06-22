@@ -712,14 +712,16 @@ class RealSenseManager:
 
     def reset_device(self, device_id: str) -> bool:
         """Reset a specific device by ID"""
-        if device_id not in self.devices:
-            self.refresh_devices()
+        with self.lock:
             if device_id not in self.devices:
                 raise RealSenseError(
                     status_code=404, detail=f"Device {device_id} not found"
                 )
+            dev = self.devices[device_id]
+            self._remove_device(device_id)
 
-        dev = self.devices[device_id]
+        self._emit_socket_event("devices_changed", {"added": [], "removed": [device_id]})
+
         try:
             dev.hardware_reset()
             return True
