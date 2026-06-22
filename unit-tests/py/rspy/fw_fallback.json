@@ -1,5 +1,5 @@
 {
-    "_comment": "Per-device FW images consumed by rspy.fw_compat. Paths are relative to libci.home so they resolve on both Linux (/usr/local/lib/ci) and Windows (C:\\LibCI). 'fallbacks' keys are device names as exposed by rspy.devices.Device (with the 'Intel RealSense ' or 'RealSense ' prefix stripped). 'gold_recovery_fw' keys: D400 SKUs share one image keyed by product line 'D400'; D500 SKUs each have their own, keyed by SKU (e.g. 'D555'). The URL is downloaded once and cached under libci.home for reuse across runs.",
+    "_comment": "Per-device FW images consumed by rspy.fw_compat. Paths are relative to libci.home so they resolve on both Linux (/usr/local/lib/ci) and Windows (C:\\LibCI). 'fallbacks' keys are device names as exposed by rspy.devices.Device (vendor prefix stripped, e.g. 'D436'). 'gold_recovery_fw' keys: D400 SKUs share one image keyed by product line 'D400'; D500 SKUs each have their own, keyed by SKU (e.g. 'D555'). The URL is downloaded once and cached under libci.home for reuse across runs.",
     "fallbacks": {
         "D436": "data/FW/D400/Signed_Image_UVC_5_17_3_10.bin"
     },

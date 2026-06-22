@@ -49,7 +49,7 @@ def gold_recovery_key( product_line, device_name=None ):
     if product_line == "D400":
         return "D400"
     # Prefix-agnostic: matches the SKU anywhere, so it works whether the name is
-    # "RealSense D555 ...", "Intel RealSense D555 ...", "D555 Recovery", etc. -> "D555"
+    # "RealSense D555 ...", "D555 Recovery", etc. -> "D555"
     m = re.search( r'D\d{3}', device_name or '' )
     return m.group( 0 ) if m else None
 
