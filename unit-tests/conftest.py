@@ -384,8 +384,61 @@ def pytest_generate_tests(metafunc):
     resolve_device_each_serials(metafunc)
 
 
-def pytest_collection_modifyitems(config, items):
+# Module-scoped fixtures that are intentionally device-independent (not re-created per camera).
+_PER_CAMERA_FIXTURE_ALLOWLIST = {
+    "_test_device_serial",          # the per-camera anchor itself (parametrized per device)
+    "__pytest_repeat_step_number",  # per-repeat pass, device-independent
+}
+
+
+def _fixture_reaches(fm, fixturedef, target, node):
+    """True if fixturedef transitively depends on the fixture named `target`."""
+    return any(arg == target
+               or any(_fixture_reaches(fm, dep, target, node)
+                      for dep in (fm.getfixturedefs(arg, node) or []))
+               for arg in fixturedef.argnames)
+
+
+def _assert_module_fixtures_are_per_camera(session, items):
+    """Guard: in a device-parametrized test, every module-scoped fixture must be re-created
+    per camera, i.e. it must (transitively) depend on _test_device_serial. A module-scoped
+    fixture that doesn't is instantiated once and SHARED across all cameras in the module, so
+    its teardown runs at module end (or a retry teardown) rather than at each camera boundary
+    — a subtle trap that previously left a disconnected D585S restore firing mid-module
+    (Jenkins win #114673). Fail collection loudly so the mistake can't slip in unnoticed.
+    """
+    fm = session._fixturemanager
+    offenders = set()
+    for item in items:
+        callspec = getattr(item, "callspec", None)
+        if not callspec or callspec.params.get("_test_device_serial") is None:
+            continue  # not bound to a camera
+        for name in item.fixturenames:
+            if name in _PER_CAMERA_FIXTURE_ALLOWLIST:
+                continue
+            defs = fm.getfixturedefs(name, item)
+            if not defs:
+                continue
+            fixturedef = defs[-1]
+            if fixturedef.scope != "module":
+                continue
+            if "site-packages" in fixturedef.func.__code__.co_filename:
+                continue  # don't police plugin fixtures (pytest-retry/repeat/etc.)
+            if not _fixture_reaches(fm, fixturedef, "_test_device_serial", item):
+                offenders.add(name)
+    if offenders:
+        raise pytest.UsageError(
+            f"Module-scoped fixture(s) {sorted(offenders)} are used by device-parametrized tests "
+            "but do not depend on _test_device_serial, so they are created once and SHARED across "
+            "every camera in the module — their teardown runs at module end, not per camera. "
+            "Depend on test_device (or _test_device_serial) for per-camera lifecycle, or add the "
+            "fixture to _PER_CAMERA_FIXTURE_ALLOWLIST if it is genuinely device-independent."
+        )
+
+
+def pytest_collection_modifyitems(session, config, items):
     """Auto-skip nightly/dds tests, filter --live, sort by priority."""
+    _assert_module_fixtures_are_per_camera(session, items)
     test_dirs = config.getoption("--test-dir", default=[])
     if test_dirs:
         abs_dirs = [os.path.abspath(p) for p in test_dirs]
@@ -684,45 +737,31 @@ def test_context_var():
 
 
 @pytest.fixture(scope="module")
-def _safety_mode_state():
-    """Module-scoped state holder for D585S service mode, keyed by device serial number.
+def test_device_wrapped(test_device):
+    """Like test_device, but puts a D585S into service mode for the module's tests on this
+    device and restores run mode at teardown.
 
-    Each serial gets its own entry so that multiple D585S cameras in the same module
-    (e.g. via device_each) are each entered into service mode independently.
-    Teardown runs once at module end, restoring run mode for every camera that was entered.
-    """
-    state = {}  # serial_number -> {'sensor': ..., 'entered': False}
-    yield state
-    for sn, entry in state.items():
-        if entry['entered'] and entry['sensor'] is not None:
-            try:
-                entry['sensor'].set_option(rs.option.safety_mode, rs.safety_mode.run)
-            except Exception as e:
-                # Don't throw on cleanup failure, to not mask test failures and also after test device is usually reset.
-                log.error(f"safety_mode restore failed for {sn}: {e}")
-
-
-@pytest.fixture(scope="module")
-def test_device_wrapped(test_device, _safety_mode_state):
-    """Like test_device, but puts D585S into service mode once per module per device.
-
-    Many option-setting operations on D585S require service mode. No-op for all other
-    device families. Service mode is entered on the first test in the module that uses
-    this fixture for a given serial, and restored once at module teardown — not toggled
-    per test case. Multiple D585S cameras are each tracked independently by serial.
+    Many option-setting operations on D585S require service mode. No-op for all other device
+    families. This fixture is parametrized per device (via test_device), so both the enter and
+    the restore run while this camera is the one currently enabled on the hub: service mode is
+    entered once for the device's tests and restored at that device's teardown, before the hub
+    switches to the next camera. That keeps enter/restore per-camera (a module-scoped state
+    holder shared across cameras would defer the restore to module end, when the hub has already
+    powered the camera off — see Jenkins win #114673).
     """
     dev, ctx = test_device
     is_d585s = dev.supports(rs.camera_info.name) and "D585S" in dev.get_info(rs.camera_info.name)
+    safety_sensor = None
     if is_d585s:
-        sn = dev.get_info(rs.camera_info.serial_number)
-        if sn not in _safety_mode_state:
-            _safety_mode_state[sn] = {'sensor': None, 'entered': False}
-        entry = _safety_mode_state[sn]
-        if not entry['entered']:
-            safety_sensor = dev.first_safety_sensor()
-            if safety_sensor.get_option(rs.option.safety_mode) != rs.safety_mode.service:
-                # Will throw on failure — intentional so we fail the test rather than run without service mode.
-                safety_sensor.set_option(rs.option.safety_mode, rs.safety_mode.service)
-            entry['sensor'] = safety_sensor
-            entry['entered'] = True
+        safety_sensor = dev.first_safety_sensor()
+        if safety_sensor.get_option(rs.option.safety_mode) != rs.safety_mode.service:
+            # Will throw on failure — intentional so we fail the test rather than run without service mode.
+            safety_sensor.set_option(rs.option.safety_mode, rs.safety_mode.service)
     yield dev, ctx
+    if safety_sensor is not None:
+        try:
+            safety_sensor.set_option(rs.option.safety_mode, rs.safety_mode.run)
+        except Exception as e:
+            # Best-effort: don't mask test failures, and the device may already be reset by teardown time.
+            sn = dev.get_info(rs.camera_info.serial_number) if dev.supports(rs.camera_info.serial_number) else "?"
+            log.warning(f"safety_mode restore skipped for {sn}: {e}")
