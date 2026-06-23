@@ -386,6 +386,8 @@ bool center_of_mass_calculator::run_non_range_com_calculation_flow(
         vec2i centerPx = {(int)(person_center.x + 0.5f), (int)(person_center.y + 0.5f)};
         result.world_pos = pixel_to_camera(centerPx, chosenDepth, *intrinsics);
         result.image_pos = {person_center.x, person_center.y};
+        float dx = result.world_pos.x, dy = result.world_pos.y, dz = result.world_pos.z;
+        result.mean_body_depth = std::sqrt(dx*dx + dy*dy + dz*dz);
     }
     return true;
 }
@@ -425,6 +427,10 @@ bool center_of_mass_calculator::calculate(
                                    raw_depth, center_mass_point, 5, 0, NO_DEPTH);
             result.world_pos = pixel_to_camera(center_mass_point, localDepth, *intrinsics);
             result.image_pos = {(float)center_mass_point.x, (float)center_mass_point.y};
+            float dx = result.world_pos.x, dy = result.world_pos.y, dz = result.world_pos.z;
+            float euclidean = std::sqrt(dx*dx + dy*dy + dz*dz);
+            if (euclidean > MIN_DEPTH)
+                result.mean_body_depth = euclidean;
         }
         if (dbg) { dbg->histogram_ok = true; dbg->image_pos_x = result.image_pos.x; dbg->image_pos_y = result.image_pos.y; }
     } else {

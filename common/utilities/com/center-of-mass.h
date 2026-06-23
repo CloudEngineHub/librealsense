@@ -52,7 +52,7 @@ struct camera_intrinsics {
 // ---------------------------------------------------------------------------
 
 struct person_center_of_mass {
-    float mean_body_depth;  // average distance to person (mm); 0 = unreliable
+    float mean_body_depth;  // Euclidean distance to person (mm); 0 = unreliable
     vec3f world_pos;        // 3D camera coords (mm); zero if intrinsics not provided
     vec2f image_pos;        // Center of Mass (COM) pixel in color/depth image; zero if intrinsics not provided
 };
