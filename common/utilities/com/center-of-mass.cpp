@@ -20,7 +20,7 @@ static constexpr int      MAX_DEPTH            = 8000;
 static constexpr int      NO_DEPTH             = 10000;
 static constexpr float    GOOD_DEPTH_RATIO     = 0.3f;
 // A cluster is treated as noise if a neighbour within NEARBY_REJECT_RANGE depth_8u
-// units (≈1200 mm) has at least NEARBY_REJECT_RATIO times more pixels.
+// units (≈450 mm) has at least NEARBY_REJECT_RATIO times more pixels.
 // This rejects foreground dust/clutter that sits slightly in front of the real body
 // while still allowing a small person cluster (e.g. person off-centre in wide bbox)
 // to win over a distant background cluster that is far outside the rejection range.
@@ -199,7 +199,7 @@ bool center_of_mass_calculator::calc_center_of_mask(
     float const centroidX = float(sumX) / cntX;
     float const symmetry  = 2.0f * std::min(leftPx, rightPx) / float(leftPx + rightPx);
     com.x = (int)(symmetry * centroidX + (1.0f - symmetry) * midX);
-    com.y = (int)(sumY / cntY);
+    com.y = (int)(float(sumY) / cntY);
     return true;
 }
 
