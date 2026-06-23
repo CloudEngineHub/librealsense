@@ -19,6 +19,14 @@ static constexpr int      MIN_DEPTH            = 400;
 static constexpr int      MAX_DEPTH            = 8000;
 static constexpr int      NO_DEPTH             = 10000;
 static constexpr float    GOOD_DEPTH_RATIO     = 0.3f;
+// A cluster is treated as noise if a neighbour within NEARBY_REJECT_RANGE depth_8u
+// units (≈1200 mm) has at least NEARBY_REJECT_RATIO times more pixels.
+// This rejects foreground dust/clutter that sits slightly in front of the real body
+// while still allowing a small person cluster (e.g. person off-centre in wide bbox)
+// to win over a distant background cluster that is far outside the rejection range.
+static constexpr float    MIN_CLUSTER_FRACT       = 0.03f;  // auto-pass — no neighbour check
+static constexpr float    NEARBY_REJECT_RATIO     = 2.0f;   // neighbour must be ≥2× larger
+static constexpr int      NEARBY_REJECT_RANGE_D8U = 40;     // ≈1200 mm window
 // Fraction of ROI height used for centroid — limits the search to the torso region
 // and prevents leg pixels (which dominate the lower bbox) from pulling the COM down.
 static constexpr float    COM_UPPER_FRACTION   = 0.65f;
@@ -274,28 +282,49 @@ bool center_of_mass_calculator::calculate_com_with_depth_range(
             if (v >= 1) { patchSum += v; ++patchCnt; }
         }
     uint8_t const center_d8u = patchCnt > 0 ? (uint8_t)(patchSum / patchCnt) : 0;
+
     if (dbg) { dbg->center_d8u = center_d8u; dbg->center_d8u_cnt = patchCnt; dbg->n_clusters = (int)allRanges.size(); }
 
-    // Always pick the NEAREST cluster (smallest midpoint depth_8u).
-    // Background is always farther than the person, and the histogram is already
-    // restricted to the upper torso region so floor/leg pixels can't inflate a far
-    // cluster.  The nearest cluster is therefore the person's body in the common case;
-    // the one exception is foreground clutter (e.g. a desk) partially overlapping the
-    // bbox, where the clutter's cluster would be picked — correct by depth geometry.
+    // Pick the NEAREST cluster (smallest midpoint depth_8u).
+    // A small cluster (< MIN_CLUSTER_FRACT) is skipped when a significantly larger
+    // neighbour exists within NEARBY_REJECT_RANGE_D8U — this rejects noise/clutter
+    // that sits just in front of the real body.  A cluster that passes MIN_CLUSTER_FRACT
+    // is always accepted; a small cluster with no dominant neighbour nearby is also
+    // accepted (e.g. person occupying a small fraction of a wide bbox with far background).
     int histRangeStart = allRanges[0].start;
     int histRangeEnd   = allRanges[0].end;
     int bestMidD       = INT_MAX;
-    for (auto const& r : allRanges) {
-        int midD = (r.start + r.end) / 2;
-        if (midD < bestMidD) { bestMidD = midD; histRangeStart = r.start; histRangeEnd = r.end; }
+    int selectedIdx    = 0;
+
+    for (int i = 0; i < (int)allRanges.size(); ++i) {
+        int midD = (allRanges[i].start + allRanges[i].end) / 2;
+        if (midD >= bestMidD) continue;  // not nearer than current best
+
+        if (allRanges[i].fract < MIN_CLUSTER_FRACT) {
+            // Check whether a dominant neighbour within ≈1200 mm makes this noise.
+            bool dominated = false;
+            for (int j = 0; j < (int)allRanges.size(); ++j) {
+                if (j == i) continue;
+                int midJ = (allRanges[j].start + allRanges[j].end) / 2;
+                if (std::abs(midJ - midD) <= NEARBY_REJECT_RANGE_D8U &&
+                    allRanges[j].fract >= NEARBY_REJECT_RATIO * allRanges[i].fract) {
+                    dominated = true;
+                    break;
+                }
+            }
+            if (dominated) continue;
+        }
+
+        bestMidD = midD;
+        histRangeStart = allRanges[i].start;
+        histRangeEnd   = allRanges[i].end;
+        selectedIdx    = i;
     }
 
     if (dbg) {
-        // Find the fract of the selected cluster
-        for (auto const& r : allRanges)
-            if (r.start == histRangeStart && r.end == histRangeEnd) { dbg->cluster_fract = r.fract; break; }
         dbg->cluster_start = histRangeStart;
         dbg->cluster_end   = histRangeEnd;
+        dbg->cluster_fract = allRanges[selectedIdx].fract;
     }
 
     if ((histRangeEnd - histRangeStart) >= (MaxDepth8U - 1)) return false;
