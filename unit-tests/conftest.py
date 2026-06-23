@@ -400,12 +400,10 @@ def _fixture_reaches(fm, fixturedef, target, node):
 
 
 def _assert_module_fixtures_are_per_camera(session, items):
-    """Guard: in a device-parametrized test, every module-scoped fixture must be re-created
-    per camera, i.e. it must (transitively) depend on _test_device_serial. A module-scoped
-    fixture that doesn't is instantiated once and SHARED across all cameras in the module, so
-    its teardown runs at module end (or a retry teardown) rather than at each camera boundary
-    — a subtle trap that previously left a disconnected D585S restore firing mid-module
-    (Jenkins win #114673). Fail collection loudly so the mistake can't slip in unnoticed.
+    """Guard: in a device-parametrized test, every module-scoped fixture must be re-created per
+    camera, i.e. (transitively) depend on _test_device_serial. One that doesn't is created once
+    and SHARED across all cameras, so its teardown runs at module end instead of per camera —
+    fail collection so that mistake can't slip in.
     """
     fm = session._fixturemanager
     offenders = set()
@@ -738,16 +736,12 @@ def test_context_var():
 
 @pytest.fixture(scope="module")
 def test_device_wrapped(test_device):
-    """Like test_device, but puts a D585S into service mode for the module's tests on this
-    device and restores run mode at teardown.
+    """Like test_device, but puts a D585S into service mode for this device's tests and restores
+    run mode at teardown. No-op for other device families.
 
-    Many option-setting operations on D585S require service mode. No-op for all other device
-    families. This fixture is parametrized per device (via test_device), so both the enter and
-    the restore run while this camera is the one currently enabled on the hub: service mode is
-    entered once for the device's tests and restored at that device's teardown, before the hub
-    switches to the next camera. That keeps enter/restore per-camera (a module-scoped state
-    holder shared across cameras would defer the restore to module end, when the hub has already
-    powered the camera off — see Jenkins win #114673).
+    Parametrized per device (via test_device), so enter and restore both run while this camera is
+    the enabled one: service mode is restored at the device's own teardown, before the hub
+    switches to the next camera (not deferred to module end via shared state).
     """
     dev, ctx = test_device
     is_d585s = dev.supports(rs.camera_info.name) and "D585S" in dev.get_info(rs.camera_info.name)
