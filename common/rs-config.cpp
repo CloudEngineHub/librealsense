@@ -15,11 +15,13 @@ using json = rsutils::json;
 
 using namespace rs2;
 
+static const std::chrono::milliseconds SAVE_INTERVAL( 500 );
+
 void config_file::set(const char* key, const char* value)
 {
     std::lock_guard< std::recursive_mutex > lk( _mutex );
     _j[key] = value;
-    save();
+    _dirty = true;
 }
 
 void config_file::set_default(const char* key, const char* calculate)
@@ -32,14 +34,14 @@ void config_file::remove(const char* key)
 {
     std::lock_guard< std::recursive_mutex > lk( _mutex );
     _j.erase(key);
-    save();
+    _dirty = true;
 }
 
 void config_file::reset()
 {
     std::lock_guard< std::recursive_mutex > lk( _mutex );
     _j = json::object();
-    save();
+    _dirty = true;
 }
 
 std::string config_file::get(const char* key, const char* def) const
@@ -102,6 +104,8 @@ config_file& config_file::instance()
 
 config_file::config_file( std::string const & filename )
     : _filename( filename )
+    , _dirty( false )
+    , _save_dispatcher( 1 )
 {
     try
     {
@@ -113,15 +117,39 @@ config_file::config_file( std::string const & filename )
     {
 
     }
+    _save_dispatcher.start();
+    schedule_save_loop();
 }
 
 void config_file::save()
 {
-    save( _filename.c_str() );
+    if( ! _filename.empty() )
+        save( _filename.c_str() );
+}
+
+config_file::~config_file()
+{
+    _save_dispatcher.stop();
+    if( _dirty.exchange( false ) )
+        save();
+}
+
+void config_file::schedule_save_loop()
+{
+    _save_dispatcher.invoke( [this]( dispatcher::cancellable_timer ct )
+    {
+        if( ! ct.try_sleep( SAVE_INTERVAL ) )
+            return;
+        if( _dirty.exchange( false ) )
+            save();
+        schedule_save_loop();
+    } );
 }
 
 config_file::config_file()
     : _j( rsutils::json::object() )
+    , _dirty( false )
+    , _save_dispatcher( 1 )
 {
 }
 
@@ -140,7 +168,7 @@ config_file& config_file::operator=(const config_file& other)
         std::lock_guard< std::recursive_mutex > lk_this( _mutex );
         _j = std::move( j_copy );
         _defaults = std::move( defaults_copy );
-        save();
+        _dirty = true;
     }
     return *this;
 }

@@ -3,7 +3,9 @@
 #pragma once
 
 #include <rsutils/json.h>
+#include <rsutils/concurrency/concurrency.h>
 
+#include <atomic>
 #include <map>
 #include <mutex>
 #include <string>
@@ -44,6 +46,7 @@ namespace rs2
     public:
         config_file();
         config_file( std::string const & filename );
+        ~config_file();
 
         void set_default(const char* key, const char* calculate);
 
@@ -140,7 +143,7 @@ namespace rs2
             }
 
             ( *current )[keys.back()] = val;
-            save();
+            _dirty = true;
         }
 
         // Sets a default value to the config and default map
@@ -183,7 +186,7 @@ namespace rs2
                     current = &( *current )[keys[i]];
                 }
                 ( *current )[keys.back()] = default_val;
-                save();
+                _dirty = true;
             }
         }
 
@@ -191,6 +194,7 @@ namespace rs2
         std::string get_default(const char* key, const char* def) const;
 
         void save();
+        void schedule_save_loop();
 
         // Serializes all reads/writes of `_j` and the on-disk file. Required because
         // viewer reads/writes config_file from multiple threads (UI thread, the
@@ -202,5 +206,7 @@ namespace rs2
         std::map<std::string, std::string> _defaults;
         std::string _filename;
         rsutils::json _j;
+        std::atomic<bool> _dirty;
+        dispatcher _save_dispatcher;
     };
 }
