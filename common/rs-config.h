@@ -3,13 +3,14 @@
 #pragma once
 
 #include <rsutils/json.h>
-#include <rsutils/concurrency/concurrency.h>
 
 #include <atomic>
+#include <condition_variable>
 #include <map>
 #include <mutex>
 #include <string>
 #include <sstream>
+#include <thread>
 #include <vector>
 #include <functional>
 
@@ -194,7 +195,7 @@ namespace rs2
         std::string get_default(const char* key, const char* def) const;
 
         void save();
-        void schedule_save_loop();
+        void save_loop();
 
         // Serializes all reads/writes of `_j` and the on-disk file. Required because
         // viewer reads/writes config_file from multiple threads (UI thread, the
@@ -207,6 +208,9 @@ namespace rs2
         std::string _filename;
         rsutils::json _j;
         std::atomic<bool> _dirty;
-        dispatcher _save_dispatcher;
+        std::condition_variable _save_cv;
+        std::mutex _save_cv_mutex;
+        bool _save_stop;
+        std::thread _save_thread;
     };
 }

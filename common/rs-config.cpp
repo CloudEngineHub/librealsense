@@ -105,7 +105,7 @@ config_file& config_file::instance()
 config_file::config_file( std::string const & filename )
     : _filename( filename )
     , _dirty( false )
-    , _save_dispatcher( 1 )
+    , _save_stop( false )
 {
     try
     {
@@ -117,8 +117,7 @@ config_file::config_file( std::string const & filename )
     {
 
     }
-    _save_dispatcher.start();
-    schedule_save_loop();
+    _save_thread = std::thread( &config_file::save_loop, this );
 }
 
 void config_file::save()
@@ -129,27 +128,34 @@ void config_file::save()
 
 config_file::~config_file()
 {
-    _save_dispatcher.stop();
+    {
+        std::lock_guard< std::mutex > lock( _save_cv_mutex );
+        _save_stop = true;
+    }
+    _save_cv.notify_one();
+    if( _save_thread.joinable() )
+        _save_thread.join();
     if( _dirty.exchange( false ) )
         save();
 }
 
-void config_file::schedule_save_loop()
+void config_file::save_loop()
 {
-    _save_dispatcher.invoke( [this]( dispatcher::cancellable_timer ct )
+    std::unique_lock< std::mutex > lock( _save_cv_mutex );
+    while( ! _save_stop )
     {
-        if( ! ct.try_sleep( SAVE_INTERVAL ) )
-            return;
+        _save_cv.wait_for( lock, SAVE_INTERVAL, [this] { return _save_stop; } );
+        lock.unlock();
         if( _dirty.exchange( false ) )
             save();
-        schedule_save_loop();
-    } );
+        lock.lock();
+    }
 }
 
 config_file::config_file()
     : _j( rsutils::json::object() )
     , _dirty( false )
-    , _save_dispatcher( 1 )
+    , _save_stop( false )
 {
 }
 
