@@ -1341,6 +1341,14 @@ namespace rs2
                std::to_string(sm->profile.stream_index());
     }
 
+    // The tile title bar is drawn in the reserved strip above the frame rect. The drag grab
+    // area (and its drawn outline) extends upward by this much to include the title bar.
+    static constexpr float TILE_HEADER_HEIGHT = 32.f;
+    static rect tile_grab_rect(const rect& r)
+    {
+        return rect{ r.x, r.y - TILE_HEADER_HEIGHT, r.w, r.h + TILE_HEADER_HEIGHT };
+    }
+
     // Generate streams layout, creates a grid-like layout with factor amount of columns.
     // The streams are assigned to cells column-major (top-to-bottom, then next column) in
     // the given order. The order is taken as-is (default sort or the user's arrangement).
@@ -1442,7 +1450,11 @@ namespace rs2
         // the saved order (e.g. newly enabled) keep their relative position at the end.
         std::map<std::string, std::vector<size_t>> serial_positions;
         for (size_t i = 0; i < _streams_order.size(); i++)
-            serial_positions[stream_serial(by_key[_streams_order[i]])].push_back(i);
+        {
+            auto kit = by_key.find(_streams_order[i]);
+            if (kit == by_key.end()) continue;
+            serial_positions[stream_serial(kit->second)].push_back(i);
+        }
 
         for (auto&& sp : serial_positions)
         {
@@ -1461,7 +1473,8 @@ namespace rs2
             {
                 for (auto it = remaining.begin(); it != remaining.end(); ++it)
                 {
-                    if (stream_descriptor(by_key[*it]) == desc)
+                    auto kit = by_key.find(*it);
+                    if (kit != by_key.end() && stream_descriptor(kit->second) == desc)
                     {
                         reordered.push_back(*it);
                         remaining.erase(it);
@@ -1478,7 +1491,11 @@ namespace rs2
         std::vector<stream_model*> ordered;
         ordered.reserve(_streams_order.size());
         for (auto key : _streams_order)
-            ordered.push_back(by_key[key]);
+        {
+            auto kit = by_key.find(key);
+            if (kit != by_key.end())
+                ordered.push_back(kit->second);
+        }
 
         return ordered;
     }
@@ -1592,19 +1609,11 @@ namespace rs2
         const bool down = mouse.mouse_down[0];
         const float2 cursor = mouse.cursor;
 
-        // The title bar is drawn in the reserved strip above the frame rect, so extend the
-        // grab area upward to include it - dragging the title bar is the intuitive gesture.
-        const float header_height = 32.f;
-        auto grab_rect = [header_height](const rect& r)
-        {
-            return rect{ r.x, r.y - header_height, r.w, r.h + header_height };
-        };
-
         // Find the tile (frame or its title bar) currently under the cursor
         int hovered = -1;
         for (auto&& kvp : layout)
         {
-            if (grab_rect(kvp.second).contains(cursor))
+            if (tile_grab_rect(kvp.second).contains(cursor))
             {
                 hovered = kvp.first;
                 break;
@@ -2015,10 +2024,20 @@ namespace rs2
         // While in re-arrange mode we drive tile drag-to-swap and suppress the per-tile
         // mouse interactions (zoom/pan/ruler) by feeding the tiles a neutral mouse.
         const bool reorder_mode = allow_streams_reorder && !fullscreen && layout.size() > 1;
-        mouse_info neutral_mouse;
+        mouse_info neutral_mouse{};
         neutral_mouse.cursor = neutral_mouse.prev_cursor = { -1e5f, -1e5f };
         if (reorder_mode)
+        {
             handle_streams_reorder(layout, mouse);
+        }
+        else
+        {
+            // Clear any drag state so a drag interrupted by leaving re-arrange mode (toggle
+            // off, fullscreen, last stream closed) can't trigger a phantom swap on re-entry.
+            _dragged_stream = -1;
+            _is_dragging_stream = false;
+            _prev_reorder_mouse_down = false;
+        }
         const mouse_info& active_mouse = reorder_mode ? neutral_mouse : mouse;
 
         for (auto &&kvp : layout)
@@ -2337,16 +2356,10 @@ namespace rs2
         // includes the title bar strip above the frame, so the outlines do too.
         if (reorder_mode)
         {
-            const float header_height = 32.f;
-            auto grab_rect = [header_height](const rect& r)
-            {
-                return rect{ r.x, r.y - header_height, r.w, r.h + header_height };
-            };
-
             for (auto&& kvp : layout)
             {
                 glColor3f(light_blue.x, light_blue.y, light_blue.z);
-                draw_rect(grab_rect(kvp.second).grow(-3), 1);
+                draw_rect(tile_grab_rect(kvp.second).grow(-3), 1);
             }
 
             if (_is_dragging_stream && _dragged_stream != -1)
@@ -2356,16 +2369,16 @@ namespace rs2
                 if (src != layout.end())
                 {
                     glColor3f(light_grey.x, light_grey.y, light_grey.z);
-                    draw_rect(grab_rect(src->second).grow(-3), 3);
+                    draw_rect(tile_grab_rect(src->second).grow(-3), 3);
                 }
 
                 // The drop target under the cursor (frame or its title bar)
                 for (auto&& kvp : layout)
                 {
-                    if (kvp.first != _dragged_stream && grab_rect(kvp.second).contains(mouse.cursor))
+                    if (kvp.first != _dragged_stream && tile_grab_rect(kvp.second).contains(mouse.cursor))
                     {
                         glColor3f(light_blue.x, light_blue.y, light_blue.z);
-                        draw_rect(grab_rect(kvp.second).grow(-3), 4);
+                        draw_rect(tile_grab_rect(kvp.second).grow(-3), 4);
                         break;
                     }
                 }
@@ -2774,8 +2787,8 @@ namespace rs2
                 // Match the Settings tooltip font (base font, not the large toolbar font)
                 ImGui::PushFont(window.get_font());
                 RsImGui::CustomTooltip("%s", allow_streams_reorder
-                    ? "Re-arrange tiles: ON - drag a stream tile onto another to swap them"
-                    : "Re-arrange tiles - drag stream tiles to swap their positions");
+                    ? "Re-arrange tiles: ON - drag a stream tile onto another to swap them.\nArrangement is saved per camera."
+                    : "Re-arrange tiles - drag stream tiles to swap their positions.\nArrangement is saved per camera.");
                 ImGui::PopFont();
                 window.link_hovered();
             }
