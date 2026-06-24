@@ -132,7 +132,7 @@ def recover_dds_device_on_golden_domain( serial ):
     rig's configured domain -- our normal discovery below would miss it. The harness detects it
     via a domain-0 fallback and passes its serial here. If a recovery device with `serial` is
     present on domain 0: gold-flash it (on domain 0), then restore its configured DDS domain
-    with rs-dds-config using --config-transient (so nothing is written to realsense-config.json
+    with rs-dds-config using --transient-sdk-domain-id (so nothing is written to realsense-config.json
     and an aborted run can't leave the config on domain 0). After this the device is back on the
     configured domain and the normal flow proceeds. Returns True if a recovery was performed.
     """
@@ -174,18 +174,15 @@ def recover_dds_device_on_golden_domain( serial ):
     #    WITHOUT persisting anything (so an aborted run can't leave the SDK config on domain 0).
     config_domain = config_file.get_domain_from_config_file_or_default()
     if config_domain and config_domain != 0:
-        # find rs-dds-config lazily -- only needed here, to restore a recovered camera's domain
-        dds_config_exe = None
-        dds_config_exe_regex = r'(^|/)rs-dds-config'
-        if platform.system() == 'Windows':
-            dds_config_exe_regex += r'\.exe'
-        dds_config_exe_regex += '$'
-        for tool in file.find( repo.build, dds_config_exe_regex ):
-            dds_config_exe = os.path.join( repo.build, tool )
+        # rs-dds-config is only needed here, to restore a recovered camera's DDS domain
+        dds_config_exe = repo.find_built_exe( 'tools/dds/dds-config', 'rs-dds-config' )
         if not dds_config_exe:
             log.f( "Recovered the camera but rs-dds-config was not found to restore its DDS domain" )
+            return False  # defensive: log.f normally exits
+        # Reach the camera on golden domain 0 (--transient-sdk-domain-id, not persisted) and set
+        # its DDS domain to the rig's configured value.
         cmd = [dds_config_exe, '--serial-number', serial,
-               '--sdk-domain-id', '0', '--config-transient', '--domain-id', str( config_domain )]
+               '--transient-sdk-domain-id', '0', '--domain-id', str( config_domain )]
         log.d( 'running:', cmd )
         subprocess.run( cmd )
         wait_for_reboot( same_version=False )
