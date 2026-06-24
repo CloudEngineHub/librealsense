@@ -5,6 +5,7 @@
 #include <rsutils/json.h>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <map>
 #include <mutex>
@@ -196,6 +197,8 @@ namespace rs2
 
         void save();
         void save_loop();
+
+        static constexpr std::chrono::milliseconds SAVE_INTERVAL{ 500 };
 
         // Serializes all reads/writes of `_j` and the on-disk file. Required because
         // viewer reads/writes config_file from multiple threads (UI thread, the

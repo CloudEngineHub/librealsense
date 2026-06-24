@@ -15,8 +15,6 @@ using json = rsutils::json;
 
 using namespace rs2;
 
-static const std::chrono::milliseconds SAVE_INTERVAL( 500 );
-
 void config_file::set(const char* key, const char* value)
 {
     std::lock_guard< std::recursive_mutex > lk( _mutex );
