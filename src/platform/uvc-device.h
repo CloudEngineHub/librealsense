@@ -268,8 +268,8 @@ public:
     {
         // Decode the SDK-facing pin_index to the matched sub-device native backend pin index
         auto dev_index = decode_pin( profile.pin_index );
-        _configured_indexes.insert( dev_index );
-        _dev[dev_index]->probe_and_commit( profile, callback, buffers );
+        _dev[dev_index]->probe_and_commit( profile, callback, buffers );  // may throw
+        _configured_indexes.insert( dev_index );  // record only after a successful commit
     }
 
 
@@ -301,8 +301,8 @@ public:
     {
         // Decode the SDK-facing pin_index to the matched sub-device native backend pin index
         auto dev_index = decode_pin( profile.pin_index );
-        _dev[dev_index]->close( profile );
         _configured_indexes.erase( dev_index );
+        _dev[dev_index]->close( profile ); // Might throw, keep after erase()
     }
 
     void set_power_state( power_state state ) override
@@ -403,7 +403,9 @@ public:
 
 private:
     // Width of the pin_index range reserved per sub-device = (max native pin index across all sub-devices) + 1.
-    // Cached because the sub-devices' profile sets are static. Always >= 1, so 0 is a safe "not computed" sentinel.
+    // Computed lazily (not at construction): get_profiles() requires the device to be powered to D0, which is not
+    // the case during enumeration. Cached because the sub-devices' profile sets are static; >= 1, so 0 is a safe
+    // "not computed" sentinel.
     uint32_t pin_stride() const
     {
         if( _pin_stride == 0 )
