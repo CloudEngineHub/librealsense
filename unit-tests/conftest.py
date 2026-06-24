@@ -57,7 +57,7 @@ from rspy.signals import register_signal_handlers
 from rspy.pytest.logging_setup import (
     setup_test_logging, bridge_rspy_log, ensure_newline, configure_logging,
     start_test_log, stop_test_log, print_terminal_summary,
-    configure_junit_failure_logging,
+    configure_junit_logging,
 )
 from rspy.pytest.log_live_format import install as install_live_log_format
 from rspy.pytest.cli import consume_legacy_flags, apply_pending_flags
@@ -417,7 +417,7 @@ def pytest_runtest_makereport(item, call):
 
 def pytest_sessionstart(session):
     """Configure the junitxml plugin once it exists (after pytest_configure)."""
-    configure_junit_failure_logging(session.config)
+    configure_junit_logging(session.config)
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):

@@ -107,12 +107,10 @@ def setup_test_logging(config):
     config._test_logdir = logdir
 
 
-def configure_junit_failure_logging(config):
-    """Embed each FAILED test's captured log into its JUnit <system-out> so the Jenkins
-    Test Result page shows the log inline, without the JUnit Attachments plugin.
-
-    Scoped to failures via log_passing_tests=False so passing tests add nothing to the
-    XML -- only the (few) failing tests carry their log, keeping the report small.
+def configure_junit_logging(config):
+    """Embed every test's captured log into its JUnit <system-out> so the Jenkins Test
+    Result page shows the log inline (for passing tests too), without the JUnit
+    Attachments plugin.
 
     Must run after the junitxml plugin has created its LogXML (we set xmlpath in
     setup_test_logging, which runs earlier in pytest_configure), so call from
@@ -123,13 +121,13 @@ def configure_junit_failure_logging(config):
     try:
         from _pytest.junitxml import LogXML
     except Exception as e:
-        log.debug(f'Could not import LogXML to configure JUnit failure logging: {e}')
+        log.debug(f'Could not import LogXML to configure JUnit logging: {e}')
         return
     for plugin in config.pluginmanager.get_plugins():
         if isinstance(plugin, LogXML):
-            plugin.logging = 'all'            # capture stdout/stderr + log records into the XML
-            plugin.log_passing_tests = False  # ...but only emit them for failing tests
-            log.debug('JUnit: failing tests will embed their log in <system-out>')
+            plugin.logging = 'all'           # capture stdout/stderr + log records into the XML
+            plugin.log_passing_tests = True  # ...for every test, including passing ones
+            log.debug('JUnit: tests will embed their log in <system-out>')
             return
 
 
