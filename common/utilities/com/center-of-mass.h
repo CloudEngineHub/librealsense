@@ -80,12 +80,11 @@ public:
     //   5. Builds a binary mask of pixels in the cluster and finds their spatial
     //      median (X and Y independently) → the 2D COM pixel.
     //   6. Attempts to extend the range slightly to include the head if a nearby
-    //      secondary peak exists within 10 depth_8u bins (~200 mm).
+    //      secondary peak exists within 5 depth_8u bins (~150 mm).
     //
     // Fallback path (when the ROI has too few valid depth pixels for the histogram):
-    //   Samples depth at NUM_DEPTH_SAMPLES evenly-spaced points along the vertical
-    //   center of the bbox. Picks the best reading using a max-within-tolerance
-    //   heuristic, falling back to mean±stddev filtering if no single sample wins.
+    //   Samples NUM_DEPTH_SAMPLES+3 evenly-spaced points along the vertical center of
+    //   the bbox and picks the nearest valid reading (minimum depth in column).
     //
     // If intrinsics != nullptr, also projects the COM pixel to 3D camera space
     // (result.world_pos) using the standard pinhole model.
@@ -158,6 +157,12 @@ private:
                                     int mask_width, int mask_height,
                                     vec2i& com,
                                     int max_y = 0);  // 0 = use full height
+
+    static bool run_non_range_com_calculation_flow(const rect&              color_rect,
+                                                   const depth_image_16&    depth,
+                                                   vec2f                    person_center,
+                                                   const camera_intrinsics* intrinsics,
+                                                   person_center_of_mass&   result);
 
 };
 

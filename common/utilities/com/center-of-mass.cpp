@@ -354,6 +354,49 @@ bool center_of_mass_calculator::calculate_com_with_depth_range(
 }
 
 // ---------------------------------------------------------------------------
+// run_non_range_com_calculation_flow  (fallback when histogram path fails)
+// ---------------------------------------------------------------------------
+
+bool center_of_mass_calculator::run_non_range_com_calculation_flow(
+    const rect& color_rect, const depth_image_16& depth,
+    vec2f person_center, const camera_intrinsics* intrinsics,
+    person_center_of_mass& result)
+{
+    // Clamp starting sample point inside the bbox
+    vec2f samplePt = person_center;
+    if (color_rect.y > person_center.y)
+        samplePt.y = (float)(color_rect.y + 10);
+
+    // Sample the center column at NUM_DEPTH_SAMPLES+3 evenly-spaced Y positions and
+    // take the NEAREST (minimum) valid depth.  The person is always in front of the
+    // background, so minimum valid depth in the column equals person depth even when
+    // most pixels are invalid (sparse IR) or some samples hit background.
+    float yProgression = color_rect.height / (float)(NUM_DEPTH_SAMPLES + 3);
+    float chosenDepth = 0.0f;
+
+    auto tryDepth = [&](float d) {
+        if (d > MIN_DEPTH && d <= MAX_DEPTH && (chosenDepth == 0.0f || d < chosenDepth))
+            chosenDepth = d;
+    };
+
+    tryDepth((float)get_depth_at_color_pixel(depth, samplePt));
+    for (int i = 0; i < NUM_DEPTH_SAMPLES + 3; ++i) {
+        float sampleY = std::min(color_rect.y + (i + 1) * yProgression,
+                                  float(color_rect.y + color_rect.height - 1));
+        tryDepth((float)get_depth_at_color_pixel(depth, {person_center.x, sampleY}));
+    }
+
+    result.mean_body_depth = chosenDepth;
+
+    if (intrinsics && chosenDepth > MIN_DEPTH) {
+        vec2i centerPx = {(int)(person_center.x + 0.5f), (int)(person_center.y + 0.5f)};
+        result.world_pos = pixel_to_camera(centerPx, chosenDepth, *intrinsics);
+        result.image_pos = {person_center.x, person_center.y};
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // calculate  (main entry point)
 // ---------------------------------------------------------------------------
 
@@ -396,9 +439,8 @@ bool center_of_mass_calculator::calculate(
             result.mean_body_depth = std::sqrt(pt.x*pt.x + pt.y*pt.y + pt.z*pt.z);
         }
     } else {
-        // Histogram failed — depth data too sparse for a reliable measurement.
-        if (intrinsics)
-            result.image_pos = { person_center_color.x, person_center_color.y };
+        // Histogram failed — depth data too sparse. Fall back to column sampling.
+        run_non_range_com_calculation_flow(color_bbox, raw_depth, person_center_color, intrinsics, result);
     }
 
     return true;

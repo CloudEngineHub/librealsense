@@ -3760,14 +3760,20 @@ namespace rs2
                     float shift_x = 0.f, shift_y = 0.f;
                     float center_px[2] = { color_bbox.x + color_bbox.w * 0.5f,
                                            color_bbox.y + color_bbox.h * 0.5f };
-                    float depth_px[2]  = { center_px[0], center_px[1] };
-                    rs2_project_color_pixel_to_depth_pixel( depth_px, depth_data, 0.001f, 0.1f, 10.f,
+                    float const depth_units = df.get_units();
+                    float depth_px[2]  = { -1.f, -1.f };
+                    rs2_project_color_pixel_to_depth_pixel( depth_px, depth_data, depth_units, 0.1f, 10.f,
                         &depth_intrin, &color_intrin, &color_to_depth, &depth_to_color, center_px );
                     if( depth_px[0] >= 0.f && depth_px[0] < float( depth_intrin.width ) &&
                         depth_px[1] >= 0.f && depth_px[1] < float( depth_intrin.height ) )
                     {
-                        shift_x = depth_px[0] - center_px[0] * depth_scale_x;
-                        shift_y = depth_px[1] - center_px[1] * depth_scale_y;
+                        uint16_t center_raw = depth_data[(int)depth_px[1] * depth_intrin.width + (int)depth_px[0]];
+                        float const center_m = center_raw * depth_units;
+                        if( center_m > 0.4f && center_m < 8.0f )
+                        {
+                            shift_x = depth_px[0] - center_px[0] * depth_scale_x;
+                            shift_y = depth_px[1] - center_px[1] * depth_scale_y;
+                        }
                     }
                     com::person_center_of_mass com_result{};
                     com::center_of_mass_calculator::calculate( com_raw, com_depth8u, com_bbox, com_center,
