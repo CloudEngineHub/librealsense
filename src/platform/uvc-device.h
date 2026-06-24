@@ -266,7 +266,8 @@ public:
 
     void probe_and_commit( stream_profile profile, frame_callback callback, int buffers ) override
     {
-        auto dev_index = get_dev_index_by_profiles( profile );
+        // Decode the SDK-facing pin_index to the matched sub-device native backend pin index
+        auto dev_index = decode_pin( profile.pin_index );
         _configured_indexes.insert( dev_index );
         _dev[dev_index]->probe_and_commit( profile, callback, buffers );
     }
@@ -298,7 +299,8 @@ public:
 
     void close( stream_profile profile ) override
     {
-        auto dev_index = get_dev_index_by_profiles( profile );
+        // Decode the SDK-facing pin_index to the matched sub-device native backend pin index
+        auto dev_index = decode_pin( profile.pin_index );
         _dev[dev_index]->close( profile );
         _configured_indexes.erase( dev_index );
     }
@@ -338,18 +340,19 @@ public:
 
     std::vector< stream_profile > get_profiles() const override
     {
+        const uint32_t stride = pin_stride();
         std::vector< stream_profile > all_stream_profiles;
         uint32_t dev_index = 0;
         for( auto & elem : _dev )
         {
             auto pin_stream_profiles = elem->get_profiles();
-            // When several sub-devices (pins) are combined, the same {w,h,fps,format} can appear on more than one
-            // pin (e.g. the two M420 RGB endpoints). Stamp the sub-device index so those stay distinct all the way
-            // up to the SDK and route back to the right pin. With a single sub-device, leave pin_index as the
-            // backend set it (e.g. the Windows MF stream index).
-            if( _dev.size() > 1 )
-                for( auto & p : pin_stream_profiles )
-                    p.pin_index = dev_index;
+            // Several sub-devices (pins) are combined into one multi_pins_uvc_device, same {w,h,fps,format} can
+            // appear on more than one pin (e.g. the two M420 RGB endpoints). We override the native backend pin index
+            // (e.g. the Windows MF stream index) to supply SDK with a unique pin ID for each profile.
+            // Encode each profile's native index together with its sub-device index into a single reversible value:
+            // native + dev_index * stride, where stride = max native pin index + 1.
+            for( auto & p : pin_stream_profiles )
+                p.pin_index = p.pin_index + dev_index * stride;
             all_stream_profiles.insert( all_stream_profiles.end(),
                                         pin_stream_profiles.begin(),
                                         pin_stream_profiles.end() );
@@ -399,26 +402,37 @@ public:
     }
 
 private:
-    uint32_t get_dev_index_by_profiles( const stream_profile & profile ) const
+    // Width of the pin_index range reserved per sub-device = (max native pin index across all sub-devices) + 1.
+    // Cached because the sub-devices' profile sets are static. Always >= 1, so 0 is a safe "not computed" sentinel.
+    uint32_t pin_stride() const
     {
-        uint32_t dev_index = 0;
-        for( auto & elem : _dev )
+        if( _pin_stride == 0 )
         {
-            auto pin_stream_profiles = elem->get_profiles();
-            for( auto & p : pin_stream_profiles )
-            {
-                if( _dev.size() > 1 )
-                    p.pin_index = dev_index;  // match the stamping applied in get_profiles()
-                if( p == profile )
-                    return dev_index;
-            }
-            ++dev_index;
+            uint32_t max_native = 0;
+            for( auto & elem : _dev )
+                for( auto & p : elem->get_profiles() )
+                    if( p.pin_index > max_native )
+                        max_native = p.pin_index;
+            _pin_stride = max_native + 1;
         }
-        throw std::runtime_error( "profile not found" );
+        return _pin_stride;
+    }
+
+    // Inverse of the encoding applied in get_profiles(): returns the sub-device index and rewrites 'pin'
+    // in place from the encoded value to the sub-device's native backend pin index.
+    uint32_t decode_pin( uint32_t & pin ) const
+    {
+        const uint32_t stride = pin_stride();
+        uint32_t dev_index = pin / stride;
+        if( dev_index >= _dev.size() )  // Guard against manual pin_index override in the SDK (e.g. for testing)
+            throw std::runtime_error( "multi_pins_uvc_device: pin_index out of range" );
+        pin %= stride;
+        return dev_index;
     }
 
     std::vector< std::shared_ptr< uvc_device > > _dev;
     std::set< uint32_t > _configured_indexes;
+    mutable uint32_t _pin_stride = 0;
 };
 
 
