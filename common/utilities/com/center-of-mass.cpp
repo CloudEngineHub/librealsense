@@ -19,9 +19,20 @@ static constexpr int      MIN_DEPTH            = 400;
 static constexpr int      MAX_DEPTH            = 8000;
 static constexpr int      NO_DEPTH             = 10000;
 static constexpr float    GOOD_DEPTH_RATIO     = 0.3f;
-// Fraction of ROI height used for centroid — limits the search to the torso region
-// and prevents leg pixels (which dominate the lower bbox) from pulling the COM down.
+// A cluster is treated as noise if a neighbour within NEARBY_REJECT_RANGE depth_8u
+// units (≈450 mm) has at least NEARBY_REJECT_RATIO times more pixels.
+// This rejects foreground dust/clutter that sits slightly in front of the real body
+// while still allowing a small person cluster (e.g. person off-centre in wide bbox)
+// to win over a distant background cluster that is far outside the rejection range.
+static constexpr float    MIN_CLUSTER_FRACT       = 0.03f;  // auto-pass — no neighbour check
+static constexpr float    NEARBY_REJECT_RATIO     = 1.5f;   // neighbour must be ≥1.5× larger
+static constexpr int      NEARBY_REJECT_RANGE_D8U = 15;     // ≈450 mm window
+// Fraction of ROI height used for histogram — wide enough to sample the full torso.
 static constexpr float    COM_UPPER_FRACTION   = 0.65f;
+// Fraction of ROI height used for the 2D centroid (dot position) — restricts to the
+// upper body so the dot lands near the chest rather than the waist.  Falls back to
+// COM_UPPER_FRACTION if no cluster pixels exist in the narrower region.
+static constexpr float    COM_CENTROID_FRACTION = 0.55f;
 static constexpr int      NUM_DEPTH_SAMPLES    = 5;
 
 // depth_8u value for MAX_DEPTH: ceil((MAX_DEPTH-400)/SCALE_DEPTH) — fits in uint8 with SCALE_DEPTH=30
@@ -164,20 +175,26 @@ bool center_of_mass_calculator::calc_center_of_mask(
 {
     if (max_y <= 0 || max_y > mask_height) max_y = mask_height;
 
-    // Both X and Y are computed over the upper max_y rows only — keeps the symmetry
-    // metric and both centroids consistent with the same torso-region pixels.
-    long long sumX = 0, sumY = 0; long long cntX = 0, cntY = 0;
+    // X: full mask height — wider sample for a stable horizontal centroid, blended
+    // toward bbox center proportionally to left-right imbalance (IR depth shadows
+    // cause one-sided coverage that biases the raw centroid).
+    long long sumX = 0; long long cntX = 0;
     int leftPx = 0, rightPx = 0;
     int const midX = mask_width / 2;
-    for (int y = 0; y < max_y; ++y)
+    for (int y = 0; y < mask_height; ++y)
         for (int x = 0; x < mask_width; ++x)
             if (mask[y * mask_width + x]) {
-                sumX += x; sumY += y; ++cntX;
+                sumX += x; ++cntX;
                 if (x < midX) ++leftPx; else ++rightPx;
             }
-    cntY = cntX;
 
-    if (cntX == 0) return false;
+    // Y: upper portion only — excludes leg pixels that pull the centroid downward.
+    long long sumY = 0; long long cntY = 0;
+    for (int y = 0; y < max_y; ++y)
+        for (int x = 0; x < mask_width; ++x)
+            if (mask[y * mask_width + x]) { sumY += y; ++cntY; }
+
+    if (cntX == 0 || cntY == 0) return false;
 
     float const centroidX = float(sumX) / cntX;
     float const symmetry  = 2.0f * std::min(leftPx, rightPx) / float(leftPx + rightPx);
@@ -192,8 +209,7 @@ bool center_of_mass_calculator::calc_center_of_mask(
 
 bool center_of_mass_calculator::calculate_com_with_depth_range(
     const depth_image_8& depth_8u,
-    const rect& roi, float& depth_mean, vec2i& center_mass_point,
-    com_debug_info* dbg)
+    const rect& roi, float& depth_mean, vec2i& center_mass_point)
 {
     int roiW = roi.width, roiH = roi.height;
     if (roiW <= 0 || roiH <= 0) return false;
@@ -262,57 +278,76 @@ bool center_of_mass_calculator::calculate_com_with_depth_range(
 
     if (allRanges.empty()) return false;
 
-    int const cx = roi.x + roi.width  / 2;
-    int const cy = roi.y + roi.height / 2;
-    // 5×5 patch mean around the ROI center — more stable than a single pixel
-    int const x0 = std::max(cx - 2, 0), x1 = std::min(cx + 2, depth_8u.width  - 1);
-    int const y0 = std::max(cy - 2, 0), y1 = std::min(cy + 2, depth_8u.height - 1);
-    int patchSum = 0, patchCnt = 0;
-    for (int py = y0; py <= y1; ++py)
-        for (int px = x0; px <= x1; ++px) {
-            uint8_t v = depth_8u.data[py * depth_8u.width + px];
-            if (v >= 1) { patchSum += v; ++patchCnt; }
-        }
-    uint8_t const center_d8u = patchCnt > 0 ? (uint8_t)(patchSum / patchCnt) : 0;
-    if (dbg) { dbg->center_d8u = center_d8u; dbg->center_d8u_cnt = patchCnt; dbg->n_clusters = (int)allRanges.size(); }
-
-    // Always pick the NEAREST cluster (smallest midpoint depth_8u).
-    // Background is always farther than the person, and the histogram is already
-    // restricted to the upper torso region so floor/leg pixels can't inflate a far
-    // cluster.  The nearest cluster is therefore the person's body in the common case;
-    // the one exception is foreground clutter (e.g. a desk) partially overlapping the
-    // bbox, where the clutter's cluster would be picked — correct by depth geometry.
+    // Pick the NEAREST cluster (smallest midpoint depth_8u).
+    // A small cluster (< MIN_CLUSTER_FRACT) is skipped when a significantly larger
+    // neighbour exists within NEARBY_REJECT_RANGE_D8U — this rejects noise/clutter
+    // that sits just in front of the real body.  A cluster that passes MIN_CLUSTER_FRACT
+    // is always accepted; a small cluster with no dominant neighbour nearby is also
+    // accepted (e.g. person occupying a small fraction of a wide bbox with far background).
     int histRangeStart = allRanges[0].start;
     int histRangeEnd   = allRanges[0].end;
     int bestMidD       = INT_MAX;
-    for (auto const& r : allRanges) {
-        int midD = (r.start + r.end) / 2;
-        if (midD < bestMidD) { bestMidD = midD; histRangeStart = r.start; histRangeEnd = r.end; }
-    }
 
-    if (dbg) {
-        // Find the fract of the selected cluster
-        for (auto const& r : allRanges)
-            if (r.start == histRangeStart && r.end == histRangeEnd) { dbg->cluster_fract = r.fract; break; }
-        dbg->cluster_start = histRangeStart;
-        dbg->cluster_end   = histRangeEnd;
+    for (int i = 0; i < (int)allRanges.size(); ++i) {
+        int midD = (allRanges[i].start + allRanges[i].end) / 2;
+        if (midD >= bestMidD) continue;  // not nearer than current best
+
+        if (allRanges[i].fract < MIN_CLUSTER_FRACT) {
+            // Check whether a dominant neighbour within ≈1200 mm makes this noise.
+            bool dominated = false;
+            for (int j = 0; j < (int)allRanges.size(); ++j) {
+                if (j == i) continue;
+                int midJ = (allRanges[j].start + allRanges[j].end) / 2;
+                if (std::abs(midJ - midD) <= NEARBY_REJECT_RANGE_D8U &&
+                    allRanges[j].fract >= NEARBY_REJECT_RATIO * allRanges[i].fract) {
+                    dominated = true;
+                    break;
+                }
+            }
+            if (dominated) continue;
+        }
+
+        bestMidD = midD;
+        histRangeStart = allRanges[i].start;
+        histRangeEnd   = allRanges[i].end;
     }
 
     if ((histRangeEnd - histRangeStart) >= (MaxDepth8U - 1)) return false;
 
-    float const meanDepth8U = calc_hist_range_mean(hist, histRangeStart, histRangeEnd);
+    float meanDepth8U = calc_hist_range_mean(hist, histRangeStart, histRangeEnd);
+
+    // Optionally extend toward a nearby head cluster (closer to camera, within ~150 mm).
+    for (auto const& r : allRanges) {
+        if (r.end < histRangeStart) {
+            float meanRange = calc_hist_range_mean(hist, r.start, r.end);
+            if ((meanDepth8U - meanRange) <= 5) { histRangeStart = r.start; break; }
+        }
+    }
+    // Recompute mean over the final range (possibly extended to include head cluster).
+    meanDepth8U = calc_hist_range_mean(hist, histRangeStart, histRangeEnd);
     depth_mean = std::floor(meanDepth8U * SCALE_DEPTH + SUBTRACT_FROM_DEPTH);
 
     // Build mask and find 2D center-of-mass.
-    // Only use pixels in the upper COM_UPPER_FRACTION of the ROI height so that
-    // leg pixels (which dominate the lower bbox) don't pull the centroid down.
+    // Use COM_CENTROID_FRACTION (narrower than the histogram region) so the dot
+    // lands in the upper-body (chest/shoulder) area rather than the waist.
+    // If the selected cluster has no pixels that high, place the dot at the
+    // horizontal centroid of the cluster and the vertical center of the upper region.
     std::vector<uint8_t> mask(roiW * roiH, 0);
     for (int j = 0; j < (int)roiData.size(); ++j)
         if (roiData[j] >= histRangeStart && roiData[j] <= histRangeEnd) mask[j] = 1;
 
-    int const comMaxY = std::max(1, (int)(roiH * COM_UPPER_FRACTION));
+    int const centroidMaxY = std::max(1, (int)(roiH * COM_CENTROID_FRACTION));
     vec2i com;
-    if (!calc_center_of_mask(mask, roiW, roiH, com, comMaxY)) return false;
+    if (!calc_center_of_mask(mask, roiW, roiH, com, centroidMaxY))
+    {
+        // Cluster pixels are below the upper-body region; use horizontal centroid
+        // of the full upper histogram region for X, and the center of the upper
+        // body band for Y — still unambiguously "top body."
+        int const histMaxY = std::max(1, (int)(roiH * COM_UPPER_FRACTION));
+        if (!calc_center_of_mask(mask, roiW, roiH, com, histMaxY))
+            return false;
+        com.y = centroidMaxY / 2;
+    }
 
     center_mass_point = {com.x + roi.x, com.y + roi.y};
     return true;
@@ -372,37 +407,40 @@ bool center_of_mass_calculator::calculate(
     const vec2f&            person_center_color,
     const camera_intrinsics*    intrinsics,
     person_center_of_mass&      result,
-    com_debug_info*             dbg)
+    vec2f                       depth_shift)
 {
     if (!raw_depth.data || raw_depth.width == 0 || raw_depth.height == 0)
         return false;
     if (!depth_8u.data || depth_8u.width != raw_depth.width || depth_8u.height != raw_depth.height)
         return false;
 
-    // 1. With aligned depth, the color bbox IS the depth ROI — just clamp to bounds
-    rect roi = clamp_rect_to_image(color_bbox, raw_depth.width, raw_depth.height);
+    // Apply the precomputed color→raw-depth pixel shift.
+    // Round to the nearest integer so the forward and reverse shifts are consistent.
+    int const shift_xi = (int)std::round(depth_shift.x);
+    int const shift_yi = (int)std::round(depth_shift.y);
+    rect shifted_bbox{ color_bbox.x + shift_xi, color_bbox.y + shift_yi,
+                       color_bbox.width, color_bbox.height };
+    rect roi = clamp_rect_to_image(shifted_bbox, raw_depth.width, raw_depth.height);
 
-    // 2. Histogram-based COM + mean depth
     float depth_mean = 0.0f;
     vec2i center_mass_point = {0, 0};
-    bool  status = calculate_com_with_depth_range(
-                       depth_8u, roi, depth_mean, center_mass_point, dbg);
+    bool  status = calculate_com_with_depth_range(depth_8u, roi, depth_mean, center_mass_point);
 
     if (status) {
         result.mean_body_depth = (depth_mean <= MIN_DEPTH) ? 0.0f : depth_mean;
 
         if (intrinsics && depth_mean > MIN_DEPTH) {
-            float localDepth = (float)get_mean_surrounding_depth(
-                                   raw_depth, center_mass_point, 5, 0, NO_DEPTH);
-            result.world_pos = pixel_to_camera(center_mass_point, localDepth, *intrinsics);
-            result.image_pos = {(float)center_mass_point.x, (float)center_mass_point.y};
+            // Project COM pixel (in raw-depth space) using histogram depth_mean as Z.
+            vec3f pt = pixel_to_camera(center_mass_point, depth_mean, *intrinsics);
+            result.world_pos = pt;
+            // Reverse-shift image_pos from raw-depth space back to the caller's input space.
+            result.image_pos = { (float)center_mass_point.x - shift_xi,
+                                 (float)center_mass_point.y - shift_yi };
+            result.mean_body_depth = std::sqrt(pt.x*pt.x + pt.y*pt.y + pt.z*pt.z);
         }
-        if (dbg) { dbg->histogram_ok = true; dbg->image_pos_x = result.image_pos.x; dbg->image_pos_y = result.image_pos.y; }
     } else {
-        // Fallback: sample-based estimation along the bbox center column
-        run_non_range_com_calculation_flow(
-            color_bbox, raw_depth, person_center_color, intrinsics, result);
-        if (dbg) { dbg->histogram_ok = false; dbg->image_pos_x = result.image_pos.x; dbg->image_pos_y = result.image_pos.y; }
+        // Histogram failed — depth data too sparse. Fall back to column sampling.
+        run_non_range_com_calculation_flow(color_bbox, raw_depth, person_center_color, intrinsics, result);
     }
 
     return true;
