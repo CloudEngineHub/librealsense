@@ -67,7 +67,7 @@ from rspy.pytest.device_helpers import (
     _MISSING_SENTINEL_PREFIX,
     _SKIP_SENTINEL_PREFIX,
 )
-from rspy.pytest.collection import filter_and_sort_items
+from rspy.pytest.collection import filter_and_sort_items, assert_module_fixtures_are_per_camera
 from rspy.pytest.plugins import check_required_plugins
 
 log = logging.getLogger('librealsense')
@@ -384,74 +384,9 @@ def pytest_generate_tests(metafunc):
     resolve_device_each_serials(metafunc)
 
 
-# Module-scoped fixtures that are intentionally device-independent (not re-created per camera).
-_PER_CAMERA_FIXTURE_ALLOWLIST = {
-    "_test_device_serial",          # the per-camera anchor itself (parametrized per device)
-    "__pytest_repeat_step_number",  # per-repeat pass, device-independent
-}
-
-
-def _fixture_reaches(fm, fixturedef, target, node):
-    """True if fixturedef transitively depends on the fixture named `target`."""
-    return any(arg == target
-               or any(_fixture_reaches(fm, dep, target, node)
-                      for dep in (fm.getfixturedefs(arg, node) or []))
-               for arg in fixturedef.argnames)
-
-
-def _assert_module_fixtures_are_per_camera(session, items):
-    """Guard: in a module that runs across more than one camera, every module-scoped fixture
-    must be re-created per camera, i.e. (transitively) depend on _test_device_serial. One that
-    doesn't is created once and SHARED across all of the module's cameras, so its teardown runs
-    at module end instead of per camera — fail collection so that mistake can't slip in.
-
-    Only modules with >1 distinct camera are checked: with a single camera, module scope is
-    already per-camera, so a module-scoped fixture there is harmless (e.g. a device_each that
-    matches one device, or a no-device CI run that resolves to a single skip sentinel).
-    """
-    fm = session._fixturemanager
-    # Group device-parametrized items by module and collect each module's distinct cameras.
-    module_items = {}    # module path -> [items]
-    module_cameras = {}  # module path -> set of distinct _test_device_serial values
-    for item in items:
-        callspec = getattr(item, "callspec", None)
-        if not callspec or callspec.params.get("_test_device_serial") is None:
-            continue  # not bound to a camera
-        mod = item.nodeid.split("::", 1)[0]
-        module_items.setdefault(mod, []).append(item)
-        module_cameras.setdefault(mod, set()).add(str(callspec.params.get("_test_device_serial")))
-
-    offenders = set()
-    for mod, mod_items in module_items.items():
-        if len(module_cameras[mod]) < 2:
-            continue  # single camera → module scope is already per-camera
-        for item in mod_items:
-            for name in item.fixturenames:
-                if name in _PER_CAMERA_FIXTURE_ALLOWLIST:
-                    continue
-                defs = fm.getfixturedefs(name, item)
-                if not defs:
-                    continue
-                fixturedef = defs[-1]
-                if fixturedef.scope != "module":
-                    continue
-                if "site-packages" in fixturedef.func.__code__.co_filename:
-                    continue  # don't police plugin fixtures (pytest-retry/repeat/etc.)
-                if not _fixture_reaches(fm, fixturedef, "_test_device_serial", item):
-                    offenders.add(name)
-    if offenders:
-        raise pytest.UsageError(
-            f"Module-scoped fixture(s) {sorted(offenders)} are used by a module that runs on more "
-            "than one camera but do not depend on _test_device_serial, so they are created once and "
-            "SHARED across the module's cameras — their teardown runs at module end, not per camera. "
-            "Depend on test_device (or _test_device_serial) for per-camera lifecycle, or add the "
-            "fixture to _PER_CAMERA_FIXTURE_ALLOWLIST if it is genuinely device-independent."
-        )
-
-
 def pytest_collection_modifyitems(session, config, items):
     """Auto-skip nightly/dds tests, filter --live, sort by priority."""
-    _assert_module_fixtures_are_per_camera(session, items)
+    assert_module_fixtures_are_per_camera(session, items)
     test_dirs = config.getoption("--test-dir", default=[])
     if test_dirs:
         abs_dirs = [os.path.abspath(p) for p in test_dirs]
@@ -759,6 +694,9 @@ def test_device_wrapped(test_device):
     switches to the next camera (not deferred to module end via shared state).
     """
     dev, ctx = test_device
+    # Read serial up front, while the device is still healthy: the restore path below runs in an
+    # except block where the device may be disconnected, so get_info() there could throw too.
+    sn = dev.get_info(rs.camera_info.serial_number) if dev.supports(rs.camera_info.serial_number) else "?"
     is_d585s = dev.supports(rs.camera_info.name) and "D585S" in dev.get_info(rs.camera_info.name)
     safety_sensor = None
     if is_d585s:
@@ -772,5 +710,4 @@ def test_device_wrapped(test_device):
             safety_sensor.set_option(rs.option.safety_mode, rs.safety_mode.run)
         except Exception as e:
             # Best-effort: don't mask test failures, and the device may already be reset by teardown time.
-            sn = dev.get_info(rs.camera_info.serial_number) if dev.supports(rs.camera_info.serial_number) else "?"
             log.warning(f"safety_mode restore skipped for {sn}: {e}")
