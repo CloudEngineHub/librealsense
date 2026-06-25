@@ -19,6 +19,16 @@ log = logging.getLogger('librealsense')
 _LOG_FORMAT = '%(asctime)s.%(msecs)03.0f -%(levelname).1s- %(message)s'
 _LOG_DATEFMT = '%H:%M:%S'
 
+
+class _NestedFormatter( logging.Formatter ):
+    """Prepend a logger's `nested` tag (e.g. '[C  ] ') to each line, mirroring the legacy
+    rspy.log line prefix (rspy/log.py). A module sets `log.nested = 'C  '` on its own
+    logger to tag its (client) lines; read here per-record so it stays per-module."""
+    def format( self, record ):
+        line = super().format( record )
+        tag = getattr( logging.getLogger( record.name ), 'nested', None )
+        return f'[{tag}] {line}' if tag else line
+
 # unit-tests/ directory — used as fallback for log output
 _unit_tests_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Walk two levels up from rspy/pytest/ to get unit-tests/py/, then one more for unit-tests/
@@ -202,7 +212,7 @@ def start_test_log(item):
         # pass's log so the Jenkins report links to the latest attempt.
         # Appending would interleave timestamps from different passes.
         file_handler = logging.FileHandler(log_path, mode='w')
-        file_handler.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt=_LOG_DATEFMT))
+        file_handler.setFormatter(_NestedFormatter(_LOG_FORMAT, datefmt=_LOG_DATEFMT))
         file_handler.setLevel(logging.DEBUG)
         logging.getLogger().addHandler(file_handler)
         _current_log_key = key
