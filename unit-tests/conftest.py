@@ -88,7 +88,8 @@ if pyrs_dir and pyrs_dir not in sys.path:
 
 # Forked children (rspy.test.remote) are a fresh interpreter that won't see our sys.path
 # edits; export PYTHONPATH so they can import rspy / pyrealsense2 (cf. run-unit-tests.py).
-os.environ["PYTHONPATH"] = py_dir
+existing = os.environ.get( "PYTHONPATH", "" )
+os.environ["PYTHONPATH"] = py_dir + ( os.pathsep + existing if existing else "" )
 if pyrs_dir:
     os.environ["PYTHONPATH"] += os.pathsep + pyrs_dir
 
