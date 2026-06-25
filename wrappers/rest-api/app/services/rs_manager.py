@@ -725,7 +725,7 @@ class RealSenseManager:
         try:
             dev.hardware_reset()
             return True
-        except RuntimeError as e:
+        except Exception as e:
             raise RealSenseError(
                 status_code=500, detail=f"Failed to reset device: {str(e)}"
             )

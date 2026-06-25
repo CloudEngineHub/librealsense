@@ -49,7 +49,7 @@ async def refresh_devices(
     """
     return await get_devices(force_refresh=True, rs_manager=rs_manager)
 
-@router.post("/{device_id}/hw_reset", response_model=bool)
+@router.post("/{device_id}/hw_reset/", response_model=bool)
 async def hw_reset_device(
     device_id: str,
     rs_manager: RealSenseManager = Depends(get_realsense_manager),
