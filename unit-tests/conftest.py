@@ -57,6 +57,7 @@ from rspy.signals import register_signal_handlers
 from rspy.pytest.logging_setup import (
     setup_test_logging, bridge_rspy_log, ensure_newline, configure_logging,
     start_test_log, stop_test_log, print_terminal_summary,
+    configure_junit_logging,
 )
 from rspy.pytest.log_live_format import install as install_live_log_format
 from rspy.pytest.cli import consume_legacy_flags, apply_pending_flags
@@ -86,6 +87,13 @@ pyrs_dir = repo.find_pyrs_dir()
 if pyrs_dir and pyrs_dir not in sys.path:
     sys.path.insert(1, pyrs_dir)
 
+# Forked children (rspy.test.remote) are a fresh interpreter that won't see our sys.path
+# edits; export PYTHONPATH so they can import rspy / pyrealsense2 (cf. run-unit-tests.py).
+existing = os.environ.get( "PYTHONPATH", "" )
+os.environ["PYTHONPATH"] = py_dir + ( os.pathsep + existing if existing else "" )
+if pyrs_dir:
+    os.environ["PYTHONPATH"] += os.pathsep + pyrs_dir
+
 try:
     import pyrealsense2 as rs
 except ImportError:
@@ -97,6 +105,11 @@ try:
 except ImportError:
     log.warning('No pyrsutils library available!')
     pyrsutils = None
+
+try:
+    import pyrealdds  # noqa: F401 — caches the module so unit-tests/dds/pytest-*.py find it after pytest reshuffles sys.path
+except ImportError:
+    pass
 
 
 # ============================================================================
@@ -354,14 +367,16 @@ def pytest_configure(config):
     if include_list:
         print(f"-D- including only devices: {' '.join(include_list)}")
 
-    # Query devices early for test parametrization
-    try:
-        hub_reset = config.getoption("--hub-reset", default=False)
-        enable_dds = 'dds' in context_list
-        devices.query(hub_reset=hub_reset, disable_dds=not enable_dds)
-        devices.map_unknown_ports()
-    except Exception as e:
-        log.warning(f"Failed to query devices during configuration: {e}")
+    # Skip under --not-live: nothing reads harness devices then, and the DDS context it
+    # creates would otherwise pollute discovery for the forked DDS servers.
+    if not config.getoption("--not-live", default=False):
+        try:
+            hub_reset = config.getoption("--hub-reset", default=False)
+            enable_dds = 'dds' in context_list
+            devices.query(hub_reset=hub_reset, disable_dds=not enable_dds)
+            devices.map_unknown_ports()
+        except Exception as e:
+            log.warning(f"Failed to query devices during configuration: {e}")
 
 
 def pytest_generate_tests(metafunc):
@@ -412,6 +427,11 @@ def pytest_runtest_makereport(item, call):
     if call.when == "call":
         ensure_newline()
         log.debug(f"Test execution took {report.duration:.3f}s")
+
+
+def pytest_sessionstart(session):
+    """Configure the junitxml plugin once it exists (after pytest_configure)."""
+    configure_junit_logging(session.config)
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):

@@ -55,11 +55,11 @@ namespace librealsense
         };
 
         static const std::map< std::uint16_t, std::string > rs500_sku_names = {
-            { D555_PID,               "Intel RealSense D555" },
-            { D555_RECOVERY_PID,      "Intel RealSense D555 Recovery" },
-            { D585_LEGACY_PID,        "Intel RealSense D585" },
-            { D585S_PID,              "Intel RealSense D585S" },
-            { D585S_RECOVERY_PID,     "Intel RealSense D585S Recovery"},
+            { D555_PID,               "RealSense D555" },
+            { D555_RECOVERY_PID,      "RealSense D555 Recovery" },
+            { D585_LEGACY_PID,        "RealSense D585" },
+            { D585S_PID,              "RealSense D585S" },
+            { D585S_RECOVERY_PID,     "RealSense D585S Recovery"},
             { D500_RECOVERY_PID,      "RealSense D500 Recovery"},
             { D500_USB2_RECOVERY_PID, "RealSense D500 Recovery"},
             { D535_2C_PID,            "RealSense D535 Dual RGB" },

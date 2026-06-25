@@ -19,6 +19,20 @@ import type {
 // Used to await completion before allowing a new start
 const pendingStopPromises = new Map<string, Promise<void>>()
 
+// Server sends point-cloud buffers as base64 strings over Socket.IO; the
+// ArrayBuffer branch is here for a future binary-attachment transport.
+function decodeUint8Payload(raw: ArrayBuffer | string): Uint8Array {
+  if (typeof raw === 'string') {
+    return Uint8Array.from(atob(raw), (c) => c.charCodeAt(0))
+  }
+  return new Uint8Array(raw)
+}
+
+function decodeFloat32Payload(raw: ArrayBuffer | string): Float32Array {
+  const u8 = decodeUint8Payload(raw)
+  return new Float32Array(u8.buffer, u8.byteOffset, u8.byteLength >> 2)
+}
+
 function buildStreamConfigs(sensors: SensorInfo[]): StreamConfig[] {
   const configs: StreamConfig[] = []
   for (const sensor of sensors) {
@@ -171,7 +185,7 @@ interface AppState {
 
   // UI state
   viewMode: ViewMode
-  setViewMode: (mode: ViewMode) => void
+  setViewMode: (mode: ViewMode) => Promise<void>
   isIMUViewerExpanded: boolean
   toggleIMUViewer: () => void
 
@@ -204,6 +218,11 @@ interface AppState {
   isLoadingOptions: boolean
   isPointCloudEnabled: boolean
   pointCloudVertices: Float32Array | null
+  // Per-vertex RGB sampled from the live color frame on the server (1 Uint8 per
+  // channel, 3 channels per vertex; aligned 1:1 with pointCloudVertices). Null
+  // when the server didn't texture the cloud (no color stream / unsupported
+  // format) — the 3D viewer falls back to a depth colormap in that case.
+  pointCloudColors: Uint8Array | null
 }
 
 export const useAppStore = create<AppState>()((set, get) => ({
@@ -757,8 +776,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   stopDeviceStreaming: async (deviceId) => {
-    // Optimistically mark stopping and hide stream immediately
+    // Optimistically mark stopping and hide stream immediately. Also drop the
+    // last point cloud so the 3D canvas doesn't show a frozen last frame after
+    // stop. If another device is still streaming its next frame will repopulate.
     set((state) => ({
+      pointCloudVertices: null,
+      pointCloudColors: null,
       deviceStates: {
         ...state.deviceStates,
         [deviceId]: {
@@ -956,6 +979,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
       )
 
       return {
+        // Drop last point cloud so the 3D canvas doesn't freeze on the last
+        // frame; a still-streaming sensor will repopulate within one frame.
+        pointCloudVertices: null,
+        pointCloudColors: null,
         deviceStates: {
           ...s.deviceStates,
           [deviceId]: {
@@ -1098,17 +1125,23 @@ export const useAppStore = create<AppState>()((set, get) => ({
         }
       }
 
-      // Extract point cloud data if present
+      // Extract point cloud data if present.
+      // Server sends raw float32 bytes as a Socket.IO binary attachment (ArrayBuffer);
+      // fall back to base64 string for older servers.
       if (streamData.point_cloud?.vertices) {
+        // Drop frames that arrive after the device was stopped — the server's
+        // stop_broadcast can race with frames already in flight, and accepting
+        // them would repopulate the cleared cloud and freeze the 3D canvas.
+        if (!get().deviceStates[deviceId]?.isStreaming) continue
         try {
-          const base64Data = streamData.point_cloud.vertices
-          const binaryString = atob(base64Data)
-          const bytes = new Uint8Array(binaryString.length)
-          for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.charCodeAt(i)
-          }
-          const vertices = new Float32Array(bytes.buffer)
-          set({ pointCloudVertices: vertices })
+          const vertices = decodeFloat32Payload(streamData.point_cloud.vertices)
+          // Colors are sampled server-side from the color frame (cpp-viewer
+          // parity). Present only when depth+color are both active and the
+          // color format is RGB8/BGR8.
+          const colors = streamData.point_cloud.colors
+            ? decodeUint8Payload(streamData.point_cloud.colors)
+            : null
+          set({ pointCloudVertices: vertices, pointCloudColors: colors })
         } catch (error) {
           console.error('Failed to decode point cloud data:', error)
         }
@@ -1173,7 +1206,37 @@ export const useAppStore = create<AppState>()((set, get) => ({
 
   // UI state
   viewMode: '2d',
-  setViewMode: (mode) => set({ viewMode: mode }),
+  setViewMode: async (mode) => {
+    const prev = get().viewMode
+    if (prev === mode) return
+    set({ viewMode: mode })
+
+    const activeDevices = Object.values(get().deviceStates).filter(ds => ds.isActive)
+    try {
+      if (mode === '3d') {
+        await Promise.all(
+          activeDevices.map(ds => apiClient.enablePointCloud(ds.device.device_id))
+        )
+      } else {
+        await Promise.all(
+          activeDevices.map(ds => apiClient.disablePointCloud(ds.device.device_id))
+        )
+        set({ pointCloudVertices: null, pointCloudColors: null })
+      }
+    } catch (err) {
+      // Roll back so the user can retry — otherwise viewMode is wedged at the
+      // new mode and the `prev === mode` short-circuit at the top blocks the
+      // retry click. Server may be partly-applied; the user is informed via
+      // the error message and a re-click will reissue enable/disable on all
+      // active devices.
+      set({
+        viewMode: prev,
+        error: `Failed to ${mode === '3d' ? 'enable' : 'disable'} point cloud: ${
+          err instanceof Error ? err.message : 'Unknown error'
+        }`,
+      })
+    }
+  },
   isIMUViewerExpanded: false,
   toggleIMUViewer: () => set((state) => ({ isIMUViewerExpanded: !state.isIMUViewerExpanded })),
 
@@ -1427,4 +1490,5 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
 
   pointCloudVertices: null,
+  pointCloudColors: null,
 }))
