@@ -161,14 +161,17 @@ def recover_dds_device_on_golden_domain( serial ):
         return False
 
     log.d( f"found recovery device {serial} ({rec_name}) on golden DDS domain 0; recovering ..." )
-    gold_fw = fw_compat.download_gold_fw( "D500", rec_name )
+    gold_fw = fw_compat.download_gold_fw( "D500", "D555" )  # D555 is the only DDS DFU SKU today; revisit for D585 etc.
     if not gold_fw:
         log.f( f"Could not download gold recovery FW for {rec_name} ({serial}); cannot recover DFU device" )
         return False  # defensive: log.f normally exits; never build a -f command with gold_fw=None
     # 1) gold-flash on domain 0 (where a bricked DDS device lives)
     cmd = [fw_updater_exe, '-r', '-f', gold_fw, '-s', serial, '--domain-id', '0']
     log.d( 'running:', cmd )
-    subprocess.run( cmd )
+    result = subprocess.run( cmd )
+    if result.returncode != 0:
+        log.f( f"Gold-flash failed for {serial} (rc={result.returncode}); device may still be in DFU" )
+        return False  # defensive: log.f normally exits; don't report success on a failed flash
     wait_for_reboot( same_version=False )
     # 2) the recovered camera comes back on golden domain 0; restore its configured domain
     #    WITHOUT persisting anything (so an aborted run can't leave the SDK config on domain 0).
@@ -184,7 +187,9 @@ def recover_dds_device_on_golden_domain( serial ):
         cmd = [dds_config_exe, '--serial-number', serial,
                '--transient-sdk-domain-id', '0', '--domain-id', str( config_domain )]
         log.d( 'running:', cmd )
-        subprocess.run( cmd )
+        result = subprocess.run( cmd )
+        if result.returncode != 0:
+            log.w( f"rs-dds-config returned rc={result.returncode}; camera may not be on DDS domain {config_domain}" )
         wait_for_reboot( same_version=False )
     return True
 

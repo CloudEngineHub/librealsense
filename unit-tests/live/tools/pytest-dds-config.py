@@ -40,7 +40,8 @@ def _config_domain():
         return None
     with open( path, "r", encoding="utf-8" ) as f:
         config = json.load( f )
-    return config["context"]["dds"]["domain"]
+    # .get() chain so a config that lacks any of these keys returns None instead of raising
+    return config.get( "context", {} ).get( "dds", {} ).get( "domain" )
 
 
 def test_transient_sdk_domain_id_does_not_persist(module_device_setup):

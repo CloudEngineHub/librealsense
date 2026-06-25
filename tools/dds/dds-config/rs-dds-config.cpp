@@ -283,7 +283,11 @@ try
         {
             INFO( "DDS is already disabled; no changes made" );
         }
-        return EXIT_SUCCESS;
+        // --disable persists a disabled default. With --transient-sdk-domain-id also set, DDS
+        // stays enabled for THIS run's context (applied above), so fall through and operate on
+        // the device; otherwise there's nothing more to do this run.
+        if( ! transient )
+            return EXIT_SUCCESS;
     }
     
     // Enable DDS in future runs (persisted). With --transient-sdk-domain-id it's already enabled
