@@ -120,7 +120,7 @@ def configure_junit_logging(config):
         return
     try:
         from _pytest.junitxml import LogXML
-    except Exception as e:
+    except ImportError as e:
         log.debug(f'Could not import LogXML to configure JUnit logging: {e}')
         return
     for plugin in config.pluginmanager.get_plugins():
@@ -129,6 +129,8 @@ def configure_junit_logging(config):
             plugin.log_passing_tests = True  # ...for every test, including passing ones
             log.debug('JUnit: tests will embed their log in <system-out>')
             return
+    log.warning('JUnit: xmlpath is set but no LogXML plugin instance was found -- '
+                'test logs will NOT be embedded in the XML.')
 
 
 def configure_logging(config, debug_requested):
