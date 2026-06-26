@@ -27,9 +27,12 @@ def test_temperatures_xu_vs_hwmc(test_device):
     ########################################  HELPERS  ##########################################
 
     def get_temperatures_from_xu():
+        pvt_temp = -10
+        ohm_temp = -10
+        proj_temp = -10
+
         pvt_temp = depth_sensor.get_option(rs.option.soc_pvt_temperature)
         ohm_temp = depth_sensor.get_option(rs.option.ohm_temperature)
-        proj_temp = -10
         if is_projector_option_supported:
             proj_temp = depth_sensor.get_option(rs.option.projector_temperature)
 
