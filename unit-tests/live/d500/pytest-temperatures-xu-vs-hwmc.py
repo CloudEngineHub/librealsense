@@ -7,6 +7,7 @@ import time
 import pytest
 import pyrealsense2 as rs
 from pytest_check import check
+from rspy.timer import Timer
 import logging
 log = logging.getLogger(__name__)
 
@@ -105,7 +106,8 @@ def test_temperatures_xu_vs_hwmc(test_device):
     # returns a real value immediately. Poll until the two paths converge (or
     # until a short timeout) so the test does not flake on this warm-up window.
     warmup_timeout = 10  # seconds (observed warm-up ~2 sec, with margin)
-    start_time = time.time()
+    timer = Timer(warmup_timeout)
+    timer.start()
     while True:
         pvt_temp_xu, ohm_temp_xu, projector_temp_xu = get_temperatures_from_xu()
         pvt_temp_hwm, ohm_temp_hwm, projector_temp_hwm = get_temperatures_from_hwm()
@@ -113,7 +115,7 @@ def test_temperatures_xu_vs_hwmc(test_device):
                      and abs(ohm_temp_xu - ohm_temp_hwm) <= tolerance
                      and (not is_projector_option_supported
                           or abs(projector_temp_xu - projector_temp_hwm) <= tolerance))
-        if converged or time.time() - start_time >= warmup_timeout:
+        if converged or timer.has_expired():
             break
         time.sleep(1)
 
