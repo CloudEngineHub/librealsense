@@ -3,6 +3,7 @@
 
 # Not frequently changing, no need to test for each commit
 
+import time
 import pytest
 import pyrealsense2 as rs
 from pytest_check import check
@@ -25,17 +26,9 @@ def test_temperatures_xu_vs_hwmc(test_device):
     ########################################  HELPERS  ##########################################
 
     def get_temperatures_from_xu():
-        nonlocal is_projector_option_supported
-        pvt_temp = -10
-        ohm_temp = -10
-        proj_temp = -10
-
-        check.is_true(depth_sensor.supports(rs.option.soc_pvt_temperature))
-        check.is_true(depth_sensor.supports(rs.option.ohm_temperature))
-        is_projector_option_supported = depth_sensor.supports(rs.option.projector_temperature)
-
         pvt_temp = depth_sensor.get_option(rs.option.soc_pvt_temperature)
         ohm_temp = depth_sensor.get_option(rs.option.ohm_temperature)
+        proj_temp = -10
         if is_projector_option_supported:
             proj_temp = depth_sensor.get_option(rs.option.projector_temperature)
 
@@ -98,11 +91,32 @@ def test_temperatures_xu_vs_hwmc(test_device):
         return pvt_temp, ohm_temp, proj_temp
 
 
-    pvt_temp_xu, ohm_temp_xu, projector_temp_xu = get_temperatures_from_xu()
-    pvt_temp_hwm, ohm_temp_hwm, projector_temp_hwm = get_temperatures_from_hwm()
+    check.is_true(depth_sensor.supports(rs.option.soc_pvt_temperature))
+    check.is_true(depth_sensor.supports(rs.option.ohm_temperature))
+    is_projector_option_supported = depth_sensor.supports(rs.option.projector_temperature)
 
     # Since PVT in XU is different sensor than PVT in HMC, we increase the tolerance to 3 deg
     tolerance = 3.0
+
+    # On DDS devices (e.g. D555) the XU temperature options return the last value
+    # pushed by the camera over DDS. Right after the camera reboots it announces
+    # these options with their default (~30 deg) and only pushes the first real
+    # reading ~2 sec after the device enumerates, while the HWMC GTEMP command
+    # returns a real value immediately. Poll until the two paths converge (or
+    # until a short timeout) so the test does not flake on this warm-up window.
+    warmup_timeout = 10  # seconds (observed warm-up ~2 sec, with margin)
+    start_time = time.time()
+    while True:
+        pvt_temp_xu, ohm_temp_xu, projector_temp_xu = get_temperatures_from_xu()
+        pvt_temp_hwm, ohm_temp_hwm, projector_temp_hwm = get_temperatures_from_hwm()
+        converged = (abs(pvt_temp_xu - pvt_temp_hwm) <= tolerance
+                     and abs(ohm_temp_xu - ohm_temp_hwm) <= tolerance
+                     and (not is_projector_option_supported
+                          or abs(projector_temp_xu - projector_temp_hwm) <= tolerance))
+        if converged or time.time() - start_time >= warmup_timeout:
+            break
+        time.sleep(1)
+
     check.almost_equal(pvt_temp_xu, pvt_temp_hwm, abs=tolerance)
     check.almost_equal(ohm_temp_xu, ohm_temp_hwm, abs=tolerance)
     if is_projector_option_supported:
