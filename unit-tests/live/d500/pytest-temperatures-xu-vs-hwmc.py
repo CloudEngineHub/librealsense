@@ -23,10 +23,9 @@ def test_temperatures_xu_vs_hwmc(test_device):
     depth_sensor = dev.first_depth_sensor()
     dp_device = dev.as_debug_protocol()
 
-    is_projector_option_supported = True
     ########################################  HELPERS  ##########################################
 
-    def get_temperatures_from_xu():
+    def get_temperatures_from_xu(depth_sensor, is_projector_option_supported):
         pvt_temp = -10
         ohm_temp = -10
         proj_temp = -10
@@ -70,7 +69,7 @@ def test_temperatures_xu_vs_hwmc(test_device):
         return temperatures_list
 
 
-    def get_temperatures_from_hwm():
+    def get_temperatures_from_hwm(dp_device, is_projector_option_supported):
         gtemp_opcode = 0x2a
 
         # getting all the available temperatures
@@ -112,8 +111,10 @@ def test_temperatures_xu_vs_hwmc(test_device):
     timer = Timer(warmup_timeout)
     timer.start()
     while True:
-        pvt_temp_xu, ohm_temp_xu, projector_temp_xu = get_temperatures_from_xu()
-        pvt_temp_hwm, ohm_temp_hwm, projector_temp_hwm = get_temperatures_from_hwm()
+        pvt_temp_xu, ohm_temp_xu, projector_temp_xu = get_temperatures_from_xu(
+            depth_sensor, is_projector_option_supported)
+        pvt_temp_hwm, ohm_temp_hwm, projector_temp_hwm = get_temperatures_from_hwm(
+            dp_device, is_projector_option_supported)
         converged = (abs(pvt_temp_xu - pvt_temp_hwm) <= tolerance
                      and abs(ohm_temp_xu - ohm_temp_hwm) <= tolerance
                      and (not is_projector_option_supported
