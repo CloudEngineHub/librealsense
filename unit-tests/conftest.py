@@ -430,6 +430,39 @@ def pytest_runtest_makereport(item, call):
         log.debug(f"Test execution took {report.duration:.3f}s")
 
 
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item):
+    """Surface pytest-check soft-check failures in the call phase.
+
+    pytest-check defers its failures to pytest_runtest_makereport. But pytest-retry
+    reruns a test by invoking pytest_runtest_call directly and building the report
+    with TestReport.from_item_and_call, which never fires makereport. So on a retry
+    attempt the soft-check failures are invisible to the retry decision (the test
+    looks passed) and instead surface later against the teardown phase, which
+    pytest-retry refuses to retry. Net effect: a retried test is reported "passed"
+    yet still fails the run with a teardown error.
+
+    Flushing the failures here, in the call phase, makes them visible to pytest-retry
+    on every attempt (a genuinely flaky soft-check test passes on retry; a persistent
+    one stays failed) and keeps them off the teardown report. Scoped to fire only for
+    the buggy case; every other path is left to pytest-check unchanged.
+    """
+    outcome = yield
+    try:
+        from pytest_check import check_log
+    except ImportError:
+        return
+    failures = check_log.get_failures()
+    if not failures:
+        return
+    # Don't mask a real exception, and leave pytest-check's xfail handling to it.
+    if outcome.excinfo is not None or item.get_closest_marker("xfail"):
+        return
+    num_failures = check_log._num_failures
+    check_log.clear_failures()
+    raise AssertionError("\n".join(failures + ["-" * 60, f"Failed Checks: {num_failures}"]))
+
+
 def pytest_sessionstart(session):
     """Configure the junitxml plugin once it exists (after pytest_configure)."""
     configure_junit_logging(session.config)
