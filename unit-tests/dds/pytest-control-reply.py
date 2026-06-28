@@ -151,3 +151,4 @@ else:
         check.equal( reply_count[device.guid()], dev1_replies + 1 )
         check.equal( reply_count[device2.guid()], dev2_replies + 1 )
 
+
