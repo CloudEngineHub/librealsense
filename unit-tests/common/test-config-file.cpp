@@ -74,7 +74,7 @@ TEST_CASE( "config/regular_update", "[common]" )
 
 // Verify the background thread saves dirty data on its own — without relying
 // on the destructor's final flush. After waiting longer than SAVE_INTERVAL
-// (500 ms) the file must exist while the config_file is still alive.
+// (1000 ms) the file must exist while the config_file is still alive.
 TEST_CASE( "config/background_save", "[common]" )
 {
     std::string path = make_test_config_path();
