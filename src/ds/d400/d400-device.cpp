@@ -666,12 +666,6 @@ namespace librealsense
                     { {RS2_FORMAT_Y8, RS2_STREAM_INFRARED, 1} , {RS2_FORMAT_Y8, RS2_STREAM_INFRARED, 2} },
                     []() { return std::make_shared<y8i_to_y8y8>(); }
                 ); // L+R
-
-                depth_sensor.register_processing_block(
-                    { RS2_FORMAT_Y12I },
-                    { {RS2_FORMAT_Y16, RS2_STREAM_INFRARED, 1}, {RS2_FORMAT_Y16, RS2_STREAM_INFRARED, 2} },
-                    []() {return std::make_shared<y12i_to_y16y16>(); }
-                );
             }
             else
             {
@@ -680,15 +674,26 @@ namespace librealsense
                     { {RS2_FORMAT_Y8, RS2_STREAM_INFRARED, 1} , {RS2_FORMAT_Y8, RS2_STREAM_INFRARED, 2} },
                     []() { return std::make_shared<y8i_to_y8y8_mipi>(); }
                 ); // L+R
+            }
 
+            if ( !_is_mipi_device )
+            {
+                depth_sensor.register_processing_block(
+                    { RS2_FORMAT_Y12I },
+                    { {RS2_FORMAT_Y16, RS2_STREAM_INFRARED, 1}, {RS2_FORMAT_Y16, RS2_STREAM_INFRARED, 2} },
+                    []() {return std::make_shared<y12i_to_y16y16>(); }
+                );
+            }
+            else
+            {
                  depth_sensor.register_processing_block(
                     { RS2_FORMAT_Y12I },
                     { {RS2_FORMAT_Y16, RS2_STREAM_INFRARED, 1}, {RS2_FORMAT_Y16, RS2_STREAM_INFRARED, 2} },
                     []() {return std::make_shared<y12i_to_y16y16_mipi>(); }
                 );
             }
-            
 
+            
             pid_hex_str = rsutils::string::from() << std::uppercase << rsutils::string::hexdump( _pid );
 
             if ((_pid == RS416_PID || _pid == RS416_RGB_PID) && _fw_version >= firmware_version("5.12.0.1"))
