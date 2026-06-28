@@ -101,13 +101,8 @@ def test_temperatures_xu_vs_hwmc(test_device):
     # Since PVT in XU is different sensor than PVT in HMC, we increase the tolerance to 3 deg
     tolerance = 3.0
 
-    # On DDS devices (e.g. D555) the XU temperature options return the last value
-    # pushed by the camera over DDS. Right after the camera reboots it announces
-    # these options with their default (~30 deg) and only pushes the first real
-    # reading ~2 sec after the device enumerates, while the HWMC GTEMP command
-    # returns a real value immediately. Poll until the two paths converge (or
-    # until a short timeout) so the test does not flake on this warm-up window.
-    warmup_timeout = 10  # seconds (observed warm-up ~2 sec, with margin)
+    # Allow the system some time to read the correct value after power up
+    warmup_timeout = 10  # seconds
     timer = Timer(warmup_timeout)
     timer.start()
     while True:
