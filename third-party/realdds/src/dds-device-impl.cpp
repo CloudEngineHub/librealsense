@@ -743,6 +743,11 @@ void dds_device::impl::create_metadata_reader()
     _metadata_reader->on_data_available(
         [this]()
         {
+            // Keep the impl alive for the duration of the dispatch, so it can't be freed mid-loop
+            // if a metadata handler drops the device's last reference.
+            auto self = weak_from_this().lock();
+            if( ! self )
+                return;
             topics::flexible_msg message;
             while( topics::flexible_msg::take_next( *_metadata_reader, &message ) )
             {
