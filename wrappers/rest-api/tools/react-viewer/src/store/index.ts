@@ -136,9 +136,6 @@ interface AppState {
   getActiveDevices: () => DeviceState[]
   isAnyDeviceStreaming: () => boolean
   
-  // Legacy single device selection (for compatibility)
-  selectedDevice: DeviceInfo | null
-  selectDevice: (device: DeviceInfo | null) => void
   resetDevice: (deviceId: string) => Promise<void>
 
   // Per-device sensors fetch
@@ -154,7 +151,7 @@ interface AppState {
   ) => Promise<void>
 
   // Per-device stream configuration  
-  updateStreamConfig: (deviceIdOrConfig: string | StreamConfig, config?: StreamConfig) => void
+  updateStreamConfig: (deviceId: string, config: StreamConfig) => void
   updateSensorConfig: (deviceId: string, sensorId: string, config: Partial<SensorConfig>) => void
 
   // Per-device streaming
@@ -207,15 +204,7 @@ interface AppState {
   setError: (error: string | null) => void
   clearError: () => void
 
-  // Legacy compatibility getters
-  sensors: SensorInfo[]
-  options: Record<string, OptionInfo[]>
-  streamConfigs: StreamConfig[]
   isStreaming: boolean
-  streamMetadata: Record<string, StreamMetadata>
-  latestMetadata: MetadataUpdate | null
-  isLoadingSensors: boolean
-  isLoadingOptions: boolean
   isPointCloudEnabled: boolean
   pointCloudVertices: Float32Array | null
   // Per-vertex RGB sampled from the live color frame on the server (1 Uint8 per
@@ -283,16 +272,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
           }
         }
 
-        // Only reconcile selectedDevice on a forced re-enumeration. The 5s poll
-        // can return a momentarily-stale cached list and must not silently null
-        // the user's selection.
-        let selectedDevice = state.selectedDevice
-        if (forceRefresh && state.selectedDevice) {
-          selectedDevice =
-            devices.find(d => d.device_id === state.selectedDevice!.device_id) || null
-        }
-
-        return { devices, deviceStates: newDeviceStates, selectedDevice, isLoadingDevices: false }
+        return { devices, deviceStates: newDeviceStates, isLoadingDevices: false }
       })
       
       // Auto-activate if exactly 1 device and user hasn't manually interacted
@@ -433,10 +413,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       set((s) => {
         const newStates = { ...s.deviceStates }
         delete newStates[device.device_id]
-        return { 
-          deviceStates: newStates,
-          selectedDevice: s.selectedDevice?.device_id === device.device_id ? null : s.selectedDevice
-        }
+        return { deviceStates: newStates }
       })
     } else {
       // Activate: create device state and fetch sensors
@@ -465,7 +442,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
       }
       set((s) => ({
         deviceStates: { ...s.deviceStates, [device.device_id]: deviceState },
-        selectedDevice: device, // Set as selected for compatibility
       }))
       
       // Fetch sensors for this device
@@ -483,36 +459,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
     return Object.values(state.deviceStates).some(ds => ds.isStreaming)
   },
 
-  // Legacy single device selection
-  selectedDevice: null,
-  selectDevice: (device) => {
-    if (device) {
-      // If device is not active, activate it
-      const state = get()
-      if (!state.deviceStates[device.device_id]?.isActive) {
-        get().toggleDeviceActive(device)
-      } else {
-        set({ selectedDevice: device })
-      }
-    } else {
-      set({ selectedDevice: null })
-    }
-  },
-
   resetDevice: async (deviceId) => {
     try {
       await apiClient.resetDevice(deviceId)
-      // Remove device state
-      set((state) => {
-        const newStates = { ...state.deviceStates }
-        delete newStates[deviceId]
-        return {
-          deviceStates: newStates,
-          selectedDevice: state.selectedDevice?.device_id === deviceId ? null : state.selectedDevice
-        }
-      })
-      // Refresh device list after reset
-      setTimeout(() => get().fetchDevices(), 2000)
     } catch (error) {
       set({
         error: `Failed to reset device: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -626,38 +575,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     }
   },
 
-  // Per-device stream configuration - supports both old and new signatures
-  updateStreamConfig: (deviceIdOrConfig: string | StreamConfig, config?: StreamConfig) => {
-    // Legacy support: if first arg is StreamConfig, use selectedDevice
-    if (typeof deviceIdOrConfig === 'object') {
-      const state = get()
-      const deviceId = state.selectedDevice?.device_id
-      if (!deviceId) return
-      
-      const legacyConfig = deviceIdOrConfig
-      set((s) => {
-        const deviceState = s.deviceStates[deviceId]
-        if (!deviceState) return s
-        
-        return {
-          deviceStates: {
-            ...s.deviceStates,
-            [deviceId]: {
-              ...deviceState,
-              streamConfigs: deviceState.streamConfigs.map((c) =>
-                c.sensor_id === legacyConfig.sensor_id && c.stream_type === legacyConfig.stream_type ? legacyConfig : c
-              ),
-            },
-          },
-        }
-      })
-      return
-    }
-    
-    // New signature: deviceId, config
-    const deviceId = deviceIdOrConfig
-    if (!config) return
-    
+  updateStreamConfig: (deviceId: string, config: StreamConfig) => {
     set((state) => {
       const deviceState = state.deviceStates[deviceId]
       if (!deviceState) return state
@@ -1169,10 +1087,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
   clearIMUHistory: () => set({ imuHistory: { accel: [], gyro: [] } }),
 
-  // Point cloud - supports both old and new signatures
   togglePointCloud: async (deviceId?: string) => {
     const state = get()
-    const targetDeviceId = deviceId || state.selectedDevice?.device_id
+    // Fall back to the first active device when caller passes no id.
+    const targetDeviceId = deviceId || Object.values(state.deviceStates).find(ds => ds.isActive)?.device.device_id
     if (!targetDeviceId) return
 
     const deviceState = state.deviceStates[targetDeviceId]
@@ -1437,56 +1355,17 @@ export const useAppStore = create<AppState>()((set, get) => ({
   setError: (error) => set({ error }),
   clearError: () => set({ error: null }),
 
-  // Legacy compatibility getters - return data from selected device
-  get sensors() {
-    const state = get()
-    if (!state.selectedDevice) return []
-    return state.deviceStates[state.selectedDevice.device_id]?.sensors || []
-  },
-
-  get options() {
-    const state = get()
-    if (!state.selectedDevice) return {}
-    return state.deviceStates[state.selectedDevice.device_id]?.options || {}
-  },
-
-  get streamConfigs() {
-    const state = get()
-    if (!state.selectedDevice) return []
-    return state.deviceStates[state.selectedDevice.device_id]?.streamConfigs || []
-  },
-
   get isStreaming() {
     const state = get()
     // Return true if any device is streaming
     return Object.values(state.deviceStates).some(ds => ds.isStreaming)
   },
 
-  get streamMetadata() {
-    const state = get()
-    if (!state.selectedDevice) return {}
-    return state.deviceStates[state.selectedDevice.device_id]?.streamMetadata || {}
-  },
-
-  get latestMetadata() {
-    return null // Deprecated, use deviceStates[deviceId].streamMetadata
-  },
-
-  get isLoadingSensors() {
-    const state = get()
-    if (!state.selectedDevice) return false
-    return state.deviceStates[state.selectedDevice.device_id]?.isLoading || false
-  },
-
-  get isLoadingOptions() {
-    return false // Now handled per-device
-  },
-
   get isPointCloudEnabled() {
     const state = get()
-    if (!state.selectedDevice) return false
-    const deviceState = state.deviceStates[state.selectedDevice.device_id]
-    return deviceState?.streamMetadata?.['depth']?.point_cloud !== undefined
+    return Object.values(state.deviceStates).some(
+      ds => ds.streamMetadata?.['depth']?.point_cloud !== undefined,
+    )
   },
 
   pointCloudVertices: null,
