@@ -151,3 +151,6 @@ else:
         check.equal( reply_count[device.guid()], dev1_replies + 1 )
         check.equal( reply_count[device2.guid()], dev2_replies + 1 )
 
+        # free the participant now so it can't linger on the domain into the next module
+        del notification2_subscription, notification_subscription, device2, device, participant
+
