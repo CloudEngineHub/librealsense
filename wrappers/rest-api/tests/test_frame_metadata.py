@@ -174,19 +174,29 @@ def test_reset_device_not_found_raises_404():
     assert exc.value.status_code == 404
 
 
-def test_reset_device_hardware_error_raises_500_after_state_cleared():
-    """Reset failure: state is already evicted (intentional — handle would be invalid post-reset);
-    error surfaces as 500 to the client."""
+def test_reset_device_hardware_error_restores_state_and_raises_500():
+    """Reset failure: device handle is still valid + device still plugged in,
+    so the cache entry is restored and an `added` event is emitted before
+    propagating the 500 to the client."""
     import pytest as _pytest
     mgr = RealSenseManager(MagicMock())
     dev = _seed_device(mgr, "serial-A")
     dev.hardware_reset.side_effect = RuntimeError("boom")
+    emitted = []
+    mgr._emit_socket_event = lambda ev, payload: emitted.append((ev, payload))
 
     with _pytest.raises(RealSenseError) as exc:
         mgr.reset_device("serial-A")
     assert exc.value.status_code == 500
     assert "boom" in exc.value.detail
-    assert "serial-A" not in mgr.devices
+    # Restored.
+    assert "serial-A" in mgr.devices
+    assert "serial-A" in mgr.device_infos
+    # Both events emitted, in order.
+    assert emitted == [
+        ("devices_changed", {"added": [], "removed": ["serial-A"]}),
+        ("devices_changed", {"added": ["serial-A"], "removed": []}),
+    ]
 
 
 def test_on_devices_changed_remove_evicts_only_target():

@@ -726,6 +726,13 @@ class RealSenseManager:
             dev.hardware_reset()
             return True
         except Exception as e:
+            # Reset failed: handle still valid, device still plugged in.
+            # Restore cache + announce device back so FE stops showing it as gone.
+            with self.lock:
+                self._register_new_device(dev)
+            self._emit_socket_event(
+                "devices_changed", {"added": [device_id], "removed": []},
+            )
             raise RealSenseError(
                 status_code=500, detail=f"Failed to reset device: {str(e)}"
             )

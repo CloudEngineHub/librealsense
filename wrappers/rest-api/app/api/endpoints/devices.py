@@ -58,7 +58,4 @@ async def hw_reset_device(
     """
     Perform a hardware reset on a specific RealSense device.
     """
-    try:
-        return rs_manager.reset_device(device_id)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    return rs_manager.reset_device(device_id)
