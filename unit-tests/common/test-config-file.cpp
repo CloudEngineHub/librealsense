@@ -83,8 +83,8 @@ TEST_CASE( "config/background_save", "[common]" )
     rs2::config_file cfg( path );
     cfg.set( "bg_key", "bg_value" );
 
-    // Wait 700 ms — longer than SAVE_INTERVAL (500 ms).
-    std::this_thread::sleep_for( std::chrono::milliseconds( 700 ) );
+    // Wait 1500 ms — longer than SAVE_INTERVAL (1000 ms).
+    std::this_thread::sleep_for( std::chrono::milliseconds( 1500 ) );
 
     // cfg is still alive here: if the value is on disk the background thread
     // wrote it, not the destructor.
