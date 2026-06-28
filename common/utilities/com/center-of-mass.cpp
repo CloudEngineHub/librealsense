@@ -24,7 +24,7 @@ static constexpr float    GOOD_DEPTH_RATIO     = 0.3f;
 // The ratio threshold (3.0×) ensures only genuine clutter is rejected — real person
 // clusters are at most ~2× smaller than a background wall, while clutter is typically
 // 5–150× smaller than the person behind it.
-static constexpr float    MIN_CLUSTER_FRACT       = 0.20f;  // auto-pass — no neighbour check
+static constexpr float    MIN_CLUSTER_FRACT       = 0.15f;  // auto-pass — no neighbour check
 static constexpr float    NEARBY_REJECT_RATIO     = 3.0f;   // neighbour must be ≥3× larger
 static constexpr int      NEARBY_REJECT_RANGE_D8U = 35;     // ≈1050 mm window
 static constexpr float    NEARBY_REJECT_DEPTH_RATIO = 2.2f; // background >2.2× farther in mm also counts as "nearby"
@@ -306,7 +306,7 @@ bool center_of_mass_calculator::calculate_com_with_depth_range(
                 int midJ = (allRanges[j].start + allRanges[j].end) / 2;
                 float const depth_j_mm = midJ * SCALE_DEPTH + SUBTRACT_FROM_DEPTH;
                 bool const nearby = (std::abs(midJ - midD) <= NEARBY_REJECT_RANGE_D8U)
-                                 || (midJ > midD && depth_j_mm > NEARBY_REJECT_DEPTH_RATIO * depth_i_mm);
+                                 || (depth_j_mm > NEARBY_REJECT_DEPTH_RATIO * depth_i_mm);
                 if (nearby && allRanges[j].fract >= NEARBY_REJECT_RATIO * allRanges[i].fract) {
                     dominated = true;
                     break;
@@ -320,7 +320,6 @@ bool center_of_mass_calculator::calculate_com_with_depth_range(
         histRangeEnd   = allRanges[i].end;
     }
 
-    if (bestMidD == INT_MAX) return false;  // every cluster was dominated — fall back to column sampler
     if ((histRangeEnd - histRangeStart) >= (MaxDepth8U - 1)) return false;
 
     float meanDepth8U = calc_hist_range_mean(hist, histRangeStart, histRangeEnd);
