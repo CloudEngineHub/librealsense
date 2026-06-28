@@ -24,6 +24,14 @@ void config_file::set(const char* key, const char* value)
     _dirty = true;
 }
 
+void config_file::set_and_save( const char * key, const char * value )
+{
+    std::lock_guard< std::recursive_mutex > lk( _mutex );
+    _j[key] = value;
+    _dirty = true;
+    save();
+}
+
 void config_file::set_default(const char* key, const char* calculate)
 {
     std::lock_guard< std::recursive_mutex > lk( _mutex );

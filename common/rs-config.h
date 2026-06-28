@@ -65,6 +65,16 @@ namespace rs2
         config_file& operator=(const config_file& other);
 
         void set(const char* key, const char* value);
+        void set_and_save(const char* key, const char* value);
+
+        template<class T>
+        void set_and_save(const char* key, T val)
+        {
+            std::stringstream ss;
+            ss << val;
+            set_and_save(key, ss.str().c_str());
+        }
+
         std::string get(const char* key, const char* def) const;
 
         config_value get(const char* key) const;
@@ -198,7 +208,7 @@ namespace rs2
         void save();
         void save_loop();
 
-        static constexpr std::chrono::milliseconds SAVE_INTERVAL{ 500 };
+        static constexpr std::chrono::milliseconds SAVE_INTERVAL{ 1000 };
 
         // Serializes all reads/writes of `_j` and the on-disk file. Required because
         // viewer reads/writes config_file from multiple threads (UI thread, the
