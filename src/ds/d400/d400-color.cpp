@@ -117,8 +117,10 @@ namespace librealsense
         else
         {
             auto color_devs_info_mi0 = filter_by_mi(group.uvc_devices, 0);
-            // one uvc device is seen over Windows and 3 uvc devices are seen over linux
-            if (color_devs_info_mi0.size() == 1 || color_devs_info_mi0.size() == 3)
+            // Color is part of the depth sensor when MI0 enumerates as:
+            // 1 UVC device on Windows, 3 UVC devices on Linux, or 2 UVC devices for RS401_GMSL on MIPI.
+            if (color_devs_info_mi0.size() == 1 || color_devs_info_mi0.size() == 3
+                || (_is_mipi_device && _pid == ds::RS401_GMSL_PID && color_devs_info_mi0.size() == 2))
             {
                 // means color end point is part of the depth sensor (e.g. D405, D401_GMSL)
                 color_devs_info = color_devs_info_mi0;
@@ -296,7 +298,7 @@ namespace librealsense
         // attributes of md_rgb_control
         auto raw_color_ep = get_raw_color_sensor();
 
-        if (!_is_mipi_device)
+        if ( !_is_mipi_device || platform::get_jetson_driver_version() >= rsutils::version("1.0.4.9"))
         {
             color_ep.register_processing_block(processing_block_factory::create_pbf_vector<yuy2_converter>(RS2_FORMAT_YUYV, map_supported_color_formats(RS2_FORMAT_YUYV), RS2_STREAM_COLOR));
             color_ep.register_processing_block(processing_block_factory::create_id_pbf(RS2_FORMAT_RAW16, RS2_STREAM_COLOR));
@@ -317,6 +319,7 @@ namespace librealsense
             }
             else
             {
+                // MIPI on x86 (ADL-P)
                 color_ep.register_processing_block(processing_block_factory::create_pbf_vector<yuy2_converter>(RS2_FORMAT_YUYV, map_supported_color_formats(RS2_FORMAT_YUYV), RS2_STREAM_COLOR));
             }
         }        

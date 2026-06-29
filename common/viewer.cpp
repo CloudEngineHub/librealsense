@@ -30,6 +30,7 @@
 #include <rsutils/easylogging/easyloggingpp.h>
 #include <regex>
 #include <algorithm>
+#include <fstream>
 
 namespace rs2
 {
@@ -3715,16 +3716,14 @@ namespace rs2
                                       float( det.bottom_right_y - det.top_left_y ) };
                 rs2::rect normalized_color_bbox = color_bbox.normalize( color_frame_rect );
 
-                // Depth is aligned to color, so color and depth pixels share the same coordinate
-                // frame (up to a resolution scale factor).  A depth-dependent reverse-projection
-                // (rs2_project_color_pixel_to_depth_pixel) is NOT needed and is harmful: the
-                // search result varies frame-to-frame with depth noise, making the ROI jitter and
-                // the COM jump.  Simple scaling gives a perfectly stable, deterministic depth bbox.
+                // depth_bbox_full: simple resolution scaling of the color bbox.
+                // COM runs within this region for a stable, deterministic depth measurement.
+                // The depth-view dot position is corrected for sensor parallax separately
+                // by projecting the single COM pixel through rs2_project_color_pixel_to_depth_pixel.
                 float const depth_scale_x = float( depth_intrin.width  ) / float( color_intrin.width  );
                 float const depth_scale_y = float( depth_intrin.height ) / float( color_intrin.height );
-                // depth_bbox_full: scaled from color bbox, before clamping to the depth frame boundary.
-                // Used to compute com_rel_u/v so they stay consistent with the color bbox at render time
-                // (the color bbox is also unclipped).  Clipping only affects the actual ROI sampled.
+                // depth_bbox_full: unclipped scaled bbox — used for com_rel_u/v normalization.
+                // Clipping only affects the actual ROI sampled.
                 rs2::rect depth_bbox_full{
                     color_bbox.x * depth_scale_x, color_bbox.y * depth_scale_y,
                     color_bbox.w * depth_scale_x, color_bbox.h * depth_scale_y };
@@ -3747,23 +3746,44 @@ namespace rs2
                         com::center_of_mass_calculator::create_depth_8u( com_raw, com_depth8u );
                         depth8u_ready = true;
                     }
-                    int const com_x = int( depth_bbox.x );
-                    int const com_y = int( depth_bbox.y );
+                    int const com_x = (int)depth_bbox.x;
+                    int const com_y = (int)depth_bbox.y;
                     com::rect  com_bbox{ com_x, com_y,
-                                         int( depth_bbox.x + depth_bbox.w + 0.5f ) - com_x,
-                                         int( depth_bbox.y + depth_bbox.h + 0.5f ) - com_y };
+                                         (int)( depth_bbox.x + depth_bbox.w + 0.5f ) - com_x,
+                                         (int)( depth_bbox.y + depth_bbox.h + 0.5f ) - com_y };
                     com::vec2f com_center{ depth_bbox.x + depth_bbox.w * 0.5f,
                                            depth_bbox.y + depth_bbox.h * 0.5f };
                     com::camera_intrinsics com_intrin{ depth_intrin.fx, depth_intrin.fy,
                                                        depth_intrin.ppx, depth_intrin.ppy };
+                    // Project bbox center from color space to raw-depth space to get
+                    // the stereo-baseline pixel shift; keep {0,0} if no depth at bbox center.
+                    float shift_x = 0.f, shift_y = 0.f;
+                    float center_px[2] = { color_bbox.x + color_bbox.w * 0.5f,
+                                           color_bbox.y + color_bbox.h * 0.5f };
+                    float const depth_units = df.get_units();
+                    float depth_px[2]  = { -1.f, -1.f };
+                    rs2_project_color_pixel_to_depth_pixel( depth_px, depth_data, depth_units, 0.1f, 10.f,
+                        &depth_intrin, &color_intrin, &color_to_depth, &depth_to_color, center_px );
+                    if( depth_px[0] >= 0.f && depth_px[0] < float( depth_intrin.width ) &&
+                        depth_px[1] >= 0.f && depth_px[1] < float( depth_intrin.height ) )
+                    {
+                        uint16_t center_raw = depth_data[(int)depth_px[1] * depth_intrin.width + (int)depth_px[0]];
+                        float const center_m = center_raw * depth_units;
+                        if( center_m > 0.4f && center_m < 8.0f )
+                        {
+                            shift_x = depth_px[0] - center_px[0] * depth_scale_x;
+                            shift_y = depth_px[1] - center_px[1] * depth_scale_y;
+                        }
+                    }
                     com::person_center_of_mass com_result{};
-                    com::center_of_mass_calculator::calculate( com_raw, com_depth8u, com_bbox, com_center, &com_intrin, com_result );
+                    com::center_of_mass_calculator::calculate( com_raw, com_depth8u, com_bbox, com_center,
+                                                               &com_intrin, com_result, { shift_x, shift_y } );
                     if( com_result.mean_body_depth > 0.f )
                     {
                         viewer_depth_m = com_result.mean_body_depth / 1000.f;
+                        auto clamp01 = []( float v ) { return v < 0.f ? 0.f : v > 1.f ? 1.f : v; };
                         if( depth_bbox_full.w > 0.f && depth_bbox_full.h > 0.f )
                         {
-                            auto clamp01 = []( float v ) { return v < 0.f ? 0.f : v > 1.f ? 1.f : v; };
                             com_rel_u = clamp01( ( com_result.image_pos.x - depth_bbox_full.x ) / depth_bbox_full.w );
                             com_rel_v = clamp01( ( com_result.image_pos.y - depth_bbox_full.y ) / depth_bbox_full.h );
                         }
