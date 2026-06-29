@@ -23,6 +23,7 @@
 #include <rsutils/accelerators/gpu.h>
 #include <rsutils/os/special-folder.h>
 #include <rsutils/string/trim-newlines.h>
+#include <rsutils/string/split.h>
 #include <common/utilities/imgui/wrap.h>
 #include <common/labeled-point-cloud-utilities.h>
 #include <common/utilities/com/center-of-mass.h>
@@ -1512,12 +1513,7 @@ namespace rs2
         std::string key = "stream_layout." + serial;
         auto& cfg = config_file::instance();
         if (cfg.contains(key.c_str()))
-        {
-            std::stringstream ss(cfg.get(key.c_str(), ""));
-            std::string tok;
-            while (std::getline(ss, tok, ','))
-                if (!tok.empty()) order.push_back(tok);
-        }
+            order = rsutils::string::split(cfg.get(key.c_str(), ""), ',');
         _stream_arrangement_by_serial[serial] = order;
         return order;
     }
@@ -1555,7 +1551,8 @@ namespace rs2
 
     std::map<int, rect> viewer_model::calc_layout(const rect& r)
     {
-        const int top_bar_height = 32;
+        // The reserved title-bar strip at the top of each cell (see tile_grab_rect)
+        const int top_bar_height = static_cast<int>(TILE_HEADER_HEIGHT);
 
         std::set<stream_model*> active_streams;
         std::map<stream_model*, int> stream_index;
@@ -2302,8 +2299,8 @@ namespace rs2
             }
 
             glColor3f(header_window_bg.x, header_window_bg.y, header_window_bg.z);
-            stream_rect.y -= 32;
-            stream_rect.h += 32;
+            stream_rect.y -= TILE_HEADER_HEIGHT;
+            stream_rect.h += TILE_HEADER_HEIGHT;
             stream_rect.w += 1;
             draw_rect(stream_rect);
 
