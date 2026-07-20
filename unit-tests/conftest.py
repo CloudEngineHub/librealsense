@@ -57,11 +57,17 @@ from rspy.signals import register_signal_handlers
 from rspy.pytest.logging_setup import (
     setup_test_logging, bridge_rspy_log, ensure_newline, configure_logging,
     start_test_log, stop_test_log, print_terminal_summary,
+    configure_junit_logging,
 )
 from rspy.pytest.log_live_format import install as install_live_log_format
 from rspy.pytest.cli import consume_legacy_flags, apply_pending_flags
-from rspy.pytest.device_helpers import find_matching_devices, find_matching_devices_multi, resolve_device_each_serials, _MISSING_SENTINEL_PREFIX, _SKIP_SENTINEL_PREFIX
-from rspy.pytest.collection import filter_and_sort_items
+from rspy.pytest.device_helpers import (
+    resolve_device_each_serials,
+    select_target_device,
+    _MISSING_SENTINEL_PREFIX,
+    _SKIP_SENTINEL_PREFIX,
+)
+from rspy.pytest.collection import filter_and_sort_items, assert_module_fixtures_are_per_camera
 from rspy.pytest.plugins import check_required_plugins
 
 log = logging.getLogger('librealsense')
@@ -81,6 +87,13 @@ pyrs_dir = repo.find_pyrs_dir()
 if pyrs_dir and pyrs_dir not in sys.path:
     sys.path.insert(1, pyrs_dir)
 
+# Forked children (rspy.test.remote) are a fresh interpreter that won't see our sys.path
+# edits; export PYTHONPATH so they can import rspy / pyrealsense2 (cf. run-unit-tests.py).
+existing = os.environ.get( "PYTHONPATH", "" )
+os.environ["PYTHONPATH"] = py_dir + ( os.pathsep + existing if existing else "" )
+if pyrs_dir:
+    os.environ["PYTHONPATH"] += os.pathsep + pyrs_dir
+
 try:
     import pyrealsense2 as rs
 except ImportError:
@@ -92,6 +105,11 @@ try:
 except ImportError:
     log.warning('No pyrsutils library available!')
     pyrsutils = None
+
+try:
+    import pyrealdds  # noqa: F401 — caches the module so unit-tests/dds/pytest-*.py find it after pytest reshuffles sys.path
+except ImportError:
+    pass
 
 
 # ============================================================================
@@ -181,19 +199,16 @@ def pytest_addoption(parser):
     )
     group.addoption(
         "--test-dir",
-        action="store",
-        default=None,
-        help="Restrict pytest discovery to tests under this directory "
-             "(matches run-unit-tests.py --test-dir for shared UNIT_TESTS_ARGS)."
+        action="append",
+        default=[],
+        help="Restrict pytest discovery to tests under this directory or file. "
+             "May be repeated (e.g. `--test-dir live/image-quality --test-dir test-fw-update.py`). "
+             "Matches run-unit-tests.py --test-dir for shared UNIT_TESTS_ARGS."
     )
 
 
 # Shared context tags (e.g. "nightly", "weekly") — tests check this to adjust behavior
 context_list = []
-
-# Module-scoped retry: tracks which (module, repeat_step) passes had failures.
-# Used by --retries to skip retry passes when the previous pass was clean.
-_module_pass_had_failure = {}  # (module_file, step) -> True
 
 
 def pytest_configure(config):
@@ -217,18 +232,42 @@ def pytest_configure(config):
         config.option.count = repeat_val
         config.option.repeat_scope = 'module'
 
-    # --retries N → module-scoped retry.  Run all tests in a file; if any fail,
-    # recycle the device and rerun the *entire* module — up to N extra attempts.
-    # Implemented on top of pytest-repeat (count = N+1, module scope).
-    # pytest-retry's function-level retry is ALWAYS disabled when --retries is used.
-    retries_val = config.getoption('retries', default=0)
-    if retries_val:
-        config.option.retries = 0           # disable pytest-retry function-level retry
-        if config.getoption('count', default=1) <= 1:
-            # --retries without --repeat: add retry passes via pytest-repeat
-            config.option.count = retries_val + 1
-            config.option.repeat_scope = 'module'
-            config._module_retry_mode = True    # skip retry passes when previous pass was clean
+    # --retries N is handled natively by the pytest-retry plugin: failed tests rerun
+    # up to N times, and the plugin tears down + re-creates module/class-scoped
+    # fixtures between attempts (pytest-retry's "preliminary teardown trick" -
+    # see pytest_retry.retry_plugin in the version pinned by requirements.txt).
+    # This gives us free device recycling and precondition re-apply.
+    #
+    # By default pytest-retry's `should_handle_retry` skips setup/teardown phase
+    # failures.  We relax that to also retry setup-phase failures (call.when ==
+    # "setup"), since those are the common case for transient hub/USB glitches
+    # at fixture time — the retry loop already does the right thing (tears down
+    # then re-runs setup + call), it just refuses to enter for setup failures.
+    # Teardown still excluded — re-running teardown after a teardown failure
+    # is brittle and matches pytest-retry's upstream stance.
+    # Regression for Jenkins win #113344 (fixture-time ERRORs must trigger retry).
+    # Version pinned by requirements.txt so upstream renames give a deterministic
+    # ImportError rather than silent behaviour drift.
+    try:
+        from pytest_retry import retry_plugin
+        def _retry_setup_too(call):
+            if call.excinfo is None or call.excinfo.typename == "Skipped":
+                return False
+            return call.when in ("setup", "call")
+        retry_plugin.should_handle_retry = _retry_setup_too
+    except ImportError:
+        pass
+
+    # We override pytest-repeat's `__pytest_repeat_step_number` to module scope so
+    # module-scoped fixtures (e.g. module_device_setup) can depend on it and re-instantiate
+    # per repeat pass.  That override only makes sense in module-scope repetition.  If a
+    # user runs `--count N` *directly* with the default function-scope, force module scope
+    # to stay consistent with the override.  --repeat already sets this above.
+    if config.getoption('count', default=1) > 1 and config.getoption('repeat_scope', default='function') == 'function':
+        log.warning("--count > 1 with default function-scope conflicts with our module-scoped "
+                    "__pytest_repeat_step_number override; forcing --repeat-scope=module. "
+                    "Use --repeat N for the module-scoped alias.")
+        config.option.repeat_scope = 'module'
 
     # Parse and store context
     context_str = config.getoption("--context", default="")
@@ -260,15 +299,9 @@ def pytest_configure(config):
 
     # Suppress verbose failure tracebacks — per-test log files have full details.
     # Keep short one-liners (-rfE) so Jenkins Groovy can parse them for log file links.
-    # pytest-retry's verbose report is also suppressed (details are in per-test log files).
     if config.getoption("--tb") == "auto":
         config.option.tbstyle = "no"
     config.option.reportchars = "fE"
-    try:
-        from pytest_retry.retry_plugin import retry_manager
-        retry_manager.build_retry_report = lambda *args, **kwargs: None
-    except ImportError:
-        pass
 
     # Suppress paramiko and cryptography deprecation warnings
     config.addinivalue_line("filterwarnings", "ignore::DeprecationWarning:cryptography")
@@ -301,6 +334,9 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "device_type_exclude(type): skip test if device connection type matches (e.g., GMSL, USB, DDS)"
     )
+    config.addinivalue_line(
+        "markers", "dds: test requires a DDS-enabled build (selected by --tag dds / -m dds)"
+    )
 
     # Configure standard logging with format matching legacy rspy.log output
     configure_logging(config, _debug_requested)
@@ -331,14 +367,16 @@ def pytest_configure(config):
     if include_list:
         print(f"-D- including only devices: {' '.join(include_list)}")
 
-    # Query devices early for test parametrization
-    try:
-        hub_reset = config.getoption("--hub-reset", default=False)
-        enable_dds = 'dds' in context_list
-        devices.query(hub_reset=hub_reset, disable_dds=not enable_dds)
-        devices.map_unknown_ports()
-    except Exception as e:
-        log.warning(f"Failed to query devices during configuration: {e}")
+    # Skip under --not-live: nothing reads harness devices then, and the DDS context it
+    # creates would otherwise pollute discovery for the forked DDS servers.
+    if not config.getoption("--not-live", default=False):
+        try:
+            hub_reset = config.getoption("--hub-reset", default=False)
+            enable_dds = 'dds' in context_list
+            devices.query(hub_reset=hub_reset, disable_dds=not enable_dds)
+            devices.map_unknown_ports()
+        except Exception as e:
+            log.warning(f"Failed to query devices during configuration: {e}")
 
 
 def pytest_generate_tests(metafunc):
@@ -346,12 +384,16 @@ def pytest_generate_tests(metafunc):
     resolve_device_each_serials(metafunc)
 
 
-def pytest_collection_modifyitems(config, items):
+def pytest_collection_modifyitems(session, config, items):
     """Auto-skip nightly/dds tests, filter --live, sort by priority."""
-    test_dir = config.getoption("--test-dir", default=None)
-    if test_dir:
-        abs_test_dir = os.path.abspath(test_dir)
-        items[:] = [item for item in items if str(item.path).startswith(abs_test_dir)]
+    assert_module_fixtures_are_per_camera(session, items)
+    test_dirs = config.getoption("--test-dir", default=[])
+    if test_dirs:
+        abs_dirs = [os.path.abspath(p) for p in test_dirs]
+        included = [item for item in items
+                    if any(str(item.path).startswith(p) for p in abs_dirs)]
+        config.hook.pytest_deselected(items=[item for item in items if item not in included])
+        items[:] = included
     filter_and_sort_items(config, items)
 
 
@@ -372,7 +414,7 @@ def pytest_runtest_protocol(item, nextitem):
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
-    """Log test duration and any failures/errors.  Track per-module failures for --retries."""
+    """Log test duration and any failures/errors."""
     outcome = yield
     report = outcome.get_result()
 
@@ -387,25 +429,43 @@ def pytest_runtest_makereport(item, call):
         ensure_newline()
         log.debug(f"Test execution took {report.duration:.3f}s")
 
-    # Record module-level failure for --retries skip-if-clean logic
-    if report.when == "call" and report.failed and getattr(item.config, '_module_retry_mode', False):
-        callspec = getattr(item, 'callspec', None)
-        step = callspec.params.get('__pytest_repeat_step_number', 0) if callspec else 0
-        mod = item.module.__file__
-        _module_pass_had_failure[(mod, step)] = True
 
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item):
+    """Surface pytest-check soft-check failures in the call phase.
 
-@pytest.hookimpl(tryfirst=True)
-def pytest_runtest_setup(item):
-    """Skip retry passes whose previous pass had no failures (--retries optimisation)."""
-    if not getattr(item.config, '_module_retry_mode', False):
+    pytest-check defers its failures to pytest_runtest_makereport. But pytest-retry
+    reruns a test by invoking pytest_runtest_call directly and building the report
+    with TestReport.from_item_and_call, which never fires makereport. So on a retry
+    attempt the soft-check failures are invisible to the retry decision (the test
+    looks passed) and instead surface later against the teardown phase, which
+    pytest-retry refuses to retry. Net effect: a retried test is reported "passed"
+    yet still fails the run with a teardown error.
+
+    Flushing the failures here, in the call phase, makes them visible to pytest-retry
+    on every attempt (a genuinely flaky soft-check test passes on retry; a persistent
+    one stays failed) and keeps them off the teardown report. Scoped to fire only for
+    the buggy case; every other path is left to pytest-check unchanged.
+    """
+    outcome = yield
+    try:
+        from pytest_check import check_log
+    except ImportError:
         return
-    callspec = getattr(item, 'callspec', None)
-    step = callspec.params.get('__pytest_repeat_step_number', 0) if callspec else 0
-    if step > 0:
-        mod = item.module.__file__
-        if not _module_pass_had_failure.get((mod, step - 1), False):
-            pytest.skip("Module retry skipped — no failures in previous pass")
+    failures = check_log.get_failures()
+    if not failures:
+        return
+    # Don't mask a real exception, and leave pytest-check's xfail handling to it.
+    if outcome.excinfo is not None or item.get_closest_marker("xfail"):
+        return
+    num_failures = check_log._num_failures
+    check_log.clear_failures()
+    raise AssertionError("\n".join(failures + ["-" * 60, f"Failed Checks: {num_failures}"]))
+
+
+def pytest_sessionstart(session):
+    """Configure the junitxml plugin once it exists (after pytest_configure)."""
+    configure_junit_logging(session.config)
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
@@ -461,116 +521,116 @@ def session_setup_teardown():
 # Device Fixtures
 # ============================================================================
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def _test_device_serial(request):
-    """Receives the device serial injected by pytest_generate_tests parametrization."""
-    return request.param
+    """Receives the device-selection value injected by ``pytest_generate_tests``.
+
+    Possible values (set in ``resolve_device_each_serials``):
+
+    - ``None``                    — no parametrization (test has no device markers).
+    - ``str`` (plain serial)      — single-spec ``device(...)`` or ``device_each(...)``
+                                    resolved to one device.
+    - ``str`` (sentinel)          — ``__SKIP__:<pattern>`` or ``__MISSING__:<pattern>``
+                                    when the lab had no usable match.
+    - ``list[str]``               — multi-spec ``device("A", "B")`` resolved to a list
+                                    of unique serials.
+    """
+    return getattr(request, 'param', None)
 
 
-@pytest.fixture(scope="function")
-def module_device_setup(request):
-    """Enable the target device via the hub. Recycles (power-cycles) once per test file, not per test case."""
-    serial_number = None
+@pytest.fixture(scope="module")
+def __pytest_repeat_step_number(request):
+    """Override pytest-repeat's function-scoped fixture so module-scoped
+    consumers (e.g. module_device_setup) can depend on it and pytest re-instantiates
+    them on each repeat pass — driving the device recycle between passes.
 
-    # Check parametrized serial from device_each / device (injected by pytest_generate_tests)
-    if hasattr(request.node, 'callspec') and '_test_device_serial' in request.node.callspec.params:
-        serial_number = request.node.callspec.params['_test_device_serial']
-        if serial_number.startswith(_SKIP_SENTINEL_PREFIX):
-            # Device matched the pattern but was excluded (wrong type, device_exclude, etc.)
-            # Mirror the non-parametrized path: had_candidates=True → skip, not fail.
-            pattern = serial_number[len(_SKIP_SENTINEL_PREFIX):]
-            pytest.skip(f"No suitable devices for requirements: {pattern}")
-        if serial_number.startswith(_MISSING_SENTINEL_PREFIX):
-            # No devices of this type found in the lab at all.
-            pattern = serial_number[len(_MISSING_SENTINEL_PREFIX):]
-            pytest.fail(f"No devices found matching requirements: {pattern}")
-        log.debug(f"Test using parametrized device: {serial_number}")
-    else:
-        # Fall back to marker-based detection (for device() marker)
-        device_markers = []
-        for marker in request.node.iter_markers():
-            if marker.name in ['device', 'device_each', 'device_exclude',
-                               'device_type', 'device_type_exclude']:
-                device_markers.append(marker)
+    Assumes ``repeat_scope='module'`` (forced in ``pytest_configure`` whenever
+    ``--count`` / ``--repeat`` ask for >1 pass).  Without parametrize
+    (--count==1) ``request.param`` is unset and we just return 0.
 
-        if not device_markers:
-            log.debug(f"Test {request.node.name} has no device requirements")
-            yield None
-            return
+    Note: with native pytest-retry handling --retries, retries don't go through
+    pytest-repeat — pytest-retry tears down module fixtures directly between
+    attempts. This fixture is only relevant for --repeat / --count.
+    """
+    return getattr(request, 'param', 0)
 
-        # Check for multi-device marker: device("D400*", "D400*") has multiple args
-        multi_device_marker = next(
-            (m for m in device_markers if m.name == 'device' and len(m.args) > 1), None
-        )
 
-        if multi_device_marker:
-            # Multi-device path: resolve each spec to a unique device
-            serial_numbers, had_candidates = find_matching_devices_multi(device_markers,
-                                                  cli_includes=request.config.getoption("--device", default=[]),
-                                                  cli_excludes=request.config.getoption("--exclude-device", default=[]))
-            expected_count = len(multi_device_marker.args)
-            if len(serial_numbers) < expected_count:
-                pytest.fail(f"Need {expected_count} devices but only {len(serial_numbers)} found")
+@pytest.fixture(scope="module", autouse=True)
+def module_device_setup(request, _test_device_serial, __pytest_repeat_step_number):
+    """Enable the target device(s) via the hub. Runs once per (module, parametrized value).
 
-            # Enable all matched devices, recycle, and yield the list of SNs
-            names = [f"{devices.get(sn).name} [{sn}]" for sn in serial_numbers]
-            log.info(f"Configuration: {', '.join(names)}")
-            try:
-                devices.enable_only(serial_numbers, recycle=True)
-                log.debug(f"All {len(serial_numbers)} devices enabled and ready")
-            except Exception as e:
-                pytest.fail(f"Failed to enable devices: {e}")
-            yield serial_numbers
-            return
+    All resolution (markers, CLI filters, sentinels for missing/skipped devices) happens
+    in ``resolve_device_each_serials`` at collection time.  The fixture just consumes
+    ``_test_device_serial`` and dispatches:
 
-        serial_numbers, had_candidates = find_matching_devices(device_markers, each=False,
-                                                  cli_includes=request.config.getoption("--device", default=[]),
-                                                  cli_excludes=request.config.getoption("--exclude-device", default=[]))
+    - ``None``            → test has no device markers; yield None.
+    - ``list[str]``       → multi-device marker; enable all serials and yield the list.
+    - sentinel strings    → ``pytest.skip`` / ``pytest.fail``.
+    - plain serial string → enable that device and yield it.
 
-        if not serial_numbers:
-            has_required = any(m.name == 'device' for m in device_markers)
-            if had_candidates:
-                pytest.skip("All matching devices were excluded")
-            elif has_required:
-                pytest.fail("No devices found matching requirements")
-            else:
-                pytest.skip("No devices found matching requirements")
+    ``autouse=True`` so the hub recycle fires at the first parametrized test in each
+    device group, not lazily at whichever test happens to be the first device-consumer.
+    Without it, a synthetic-only test that runs before a live-device test in the same
+    parametrize group would defer the recycle — making the recycle landing point
+    depend on test declaration order. For tests without any device marker
+    (``_test_device_serial is None``) the body yields None immediately, costing nothing.
+    """
+    serial_number = _test_device_serial
 
-        serial_number = serial_numbers[0]
-        log.debug(f"Test will use first matching device: {serial_number}")
+    if serial_number is None:
+        log.debug(f"Module {request.node.name} has no device requirements")
+        yield None
+        return
 
-    # Enable only this device; recycle only once per module (like run-unit-tests.py),
-    # and at the start of each module-scoped repeat pass (--repeat).
+    if isinstance(serial_number, list):
+        # Multi-device path: parametrized list of serials. Sentinels are always strings,
+        # so the list form never carries skip/missing semantics.
+        names = [
+            f"{(devices.get(sn).name if devices.get(sn) else sn)} [{sn}]"
+            for sn in serial_number
+        ]
+        log.info(f"Configuration: {', '.join(names)}")
+        try:
+            devices.enable_only(serial_number, recycle=True)
+            log.debug(f"All {len(serial_number)} devices enabled and ready")
+        except Exception as e:
+            pytest.fail(f"Failed to enable devices: {e}")
+        yield serial_number
+        return
+
+    # Single-device path (parametrized string value, including sentinels).
+    if serial_number.startswith(_SKIP_SENTINEL_PREFIX):
+        pattern = serial_number[len(_SKIP_SENTINEL_PREFIX):]
+        pytest.skip(f"No suitable devices for requirements: {pattern}")
+    if serial_number.startswith(_MISSING_SENTINEL_PREFIX):
+        pattern = serial_number[len(_MISSING_SENTINEL_PREFIX):]
+        pytest.fail(f"No devices found matching requirements: {pattern}")
+    log.debug(f"Test using parametrized device: {serial_number}")
+
+    # Enable the device for this module. Module-scoped fixture lifecycle handles
+    # recycle/reuse automatically: pytest re-instantiates this fixture per
+    # (module, _test_device_serial, __pytest_repeat_step_number), so the device
+    # is power-cycled exactly when it needs to change.
+    #
+    # --no-reset additionally skips enable_only on subsequent passes for the same
+    # serial within the same module, matching the legacy behavior.
     device = devices.get(serial_number)
     device_name = device.name if device else serial_number
     log.info(f"Configuration: {device_name} [{serial_number}]")
 
-    module = request.node.module
     no_reset = request.config.getoption("--no-reset", default=False)
-    last_device = getattr(module, '_last_device_serial', None)
-    device_changed = (last_device is not None and last_device != serial_number)
-    first_setup = (last_device is None)
-
-    # Detect the start of a new module-scoped repeat pass.
-    # pytest-repeat parametrizes __pytest_repeat_step_number (0-based); recycle when it advances.
-    callspec = getattr(request.node, 'callspec', None)
-    repeat_step = callspec.params.get('__pytest_repeat_step_number') if callspec else None
-    last_repeat_step = getattr(module, '_last_repeat_step', None)
-    is_new_repeat_pass = repeat_step is not None and last_repeat_step is not None and repeat_step != last_repeat_step
-
-    recycle = not no_reset and (first_setup or device_changed or is_new_repeat_pass)
-
-    if not recycle and not first_setup:
-        log.debug(f"Device {serial_number} already enabled, skipping hub setup")
-        module._last_repeat_step = repeat_step
+    module_obj = request.module
+    already_enabled_serial = getattr(module_obj, '_module_last_serial', None)
+    if no_reset and already_enabled_serial == serial_number:
+        log.debug(f"Device {serial_number} already enabled (--no-reset), skipping hub setup")
         yield serial_number
         return
 
+    recycle = not no_reset
     try:
         log.debug(f"{'Recycling' if recycle else 'Enabling'} device via hub...")
         devices.enable_only([serial_number], recycle=recycle)
-        module._last_device_serial = serial_number
-        module._last_repeat_step = repeat_step
+        module_obj._module_last_serial = serial_number
         log.debug(f"Device enabled and ready")
     except Exception as e:
         pytest.fail(f"Failed to enable device {serial_number}: {e}")
@@ -578,9 +638,9 @@ def module_device_setup(request):
     yield serial_number
 
 
-@pytest.fixture
-def test_context(request, module_device_setup):
-    """Create a fresh rs.context() for the test. Depends on module_device_setup for hub state."""
+@pytest.fixture(scope="module")
+def test_context(module_device_setup):
+    """Create an rs.context() once per module/device. Depends on module_device_setup for hub state."""
     if not rs:
         pytest.skip("pyrealsense2 not available")
 
@@ -592,20 +652,42 @@ def test_context(request, module_device_setup):
     return ctx
 
 
-@pytest.fixture
-def test_device(test_context):
-    """Return (device, context) for the first visible device, or fail if none found."""
+@pytest.fixture(scope="module")
+def test_device(test_context, module_device_setup):
+    """Return (device, context) for the test's target device, or fail if none found."""
     devices_list = list(test_context.devices)
     if not devices_list:
         pytest.fail("No device available for test")
 
-    dev = devices_list[0]
+    dev = select_target_device(devices_list, module_device_setup)
     log.debug(f"Test using device: {dev.get_info(rs.camera_info.name) if dev.supports(rs.camera_info.name) else 'Unknown'}")
 
     return dev, test_context
 
 
 @pytest.fixture
+def function_scoped_device(test_context, module_device_setup):
+    """Function-scoped: re-query the module-scoped ``test_context`` and return a
+    *fresh* device wrapper for the test's target device.  Use this in tests that
+    mutate persistent device state (e.g. HDR sequencer overrides in
+    ``pytest-hdr-long.py``) and need each test to start from a new device object,
+    even though the underlying ``rs.context()`` is shared across the module.
+
+    Reuses the module-scoped context — no extra context construction cost.  Pair
+    with ``test_context`` if the test also needs the context (e.g. to build an
+    ``rs.pipeline(ctx)``).
+    """
+    devices_list = list(test_context.devices)
+    if not devices_list:
+        pytest.fail("No device available for test")
+
+    dev = select_target_device(devices_list, module_device_setup)
+    log.debug(f"Test using fresh device handle: {dev.get_info(rs.camera_info.name) if dev.supports(rs.camera_info.name) else 'Unknown'}")
+
+    return dev
+
+
+@pytest.fixture(scope="module")
 def test_devices(test_context, module_device_setup):
     """Return (device_list, context) for multi-device tests.
 
@@ -636,45 +718,29 @@ def test_context_var():
 
 
 @pytest.fixture(scope="module")
-def _safety_mode_state():
-    """Module-scoped state holder for D585S service mode, keyed by device serial number.
+def test_device_wrapped(test_device):
+    """Like test_device, but puts a D585S into service mode for this device's tests and restores
+    run mode at teardown. No-op for other device families.
 
-    Each serial gets its own entry so that multiple D585S cameras in the same module
-    (e.g. via device_each) are each entered into service mode independently.
-    Teardown runs once at module end, restoring run mode for every camera that was entered.
-    """
-    state = {}  # serial_number -> {'sensor': ..., 'entered': False}
-    yield state
-    for sn, entry in state.items():
-        if entry['entered'] and entry['sensor'] is not None:
-            try:
-                entry['sensor'].set_option(rs.option.safety_mode, rs.safety_mode.run)
-            except Exception as e:
-                # Don't throw on cleanup failure, to not mask test failures and also after test device is usually reset.
-                log.error(f"safety_mode restore failed for {sn}: {e}")
-
-
-@pytest.fixture
-def test_device_wrapped(test_device, _safety_mode_state):
-    """Like test_device, but puts D585S into service mode once per module per device.
-
-    Many option-setting operations on D585S require service mode. No-op for all other
-    device families. Service mode is entered on the first test in the module that uses
-    this fixture for a given serial, and restored once at module teardown — not toggled
-    per test case. Multiple D585S cameras are each tracked independently by serial.
+    Parametrized per device (via test_device), so enter and restore both run while this camera is
+    the enabled one: service mode is restored at the device's own teardown, before the hub
+    switches to the next camera (not deferred to module end via shared state).
     """
     dev, ctx = test_device
+    # Read serial up front, while the device is still healthy: the restore path below runs in an
+    # except block where the device may be disconnected, so get_info() there could throw too.
+    sn = dev.get_info(rs.camera_info.serial_number) if dev.supports(rs.camera_info.serial_number) else "?"
     is_d585s = dev.supports(rs.camera_info.name) and "D585S" in dev.get_info(rs.camera_info.name)
+    safety_sensor = None
     if is_d585s:
-        sn = dev.get_info(rs.camera_info.serial_number)
-        if sn not in _safety_mode_state:
-            _safety_mode_state[sn] = {'sensor': None, 'entered': False}
-        entry = _safety_mode_state[sn]
-        if not entry['entered']:
-            safety_sensor = dev.first_safety_sensor()
-            if safety_sensor.get_option(rs.option.safety_mode) != rs.safety_mode.service:
-                # Will throw on failure — intentional so we fail the test rather than run without service mode.
-                safety_sensor.set_option(rs.option.safety_mode, rs.safety_mode.service)
-            entry['sensor'] = safety_sensor
-            entry['entered'] = True
+        safety_sensor = dev.first_safety_sensor()
+        if safety_sensor.get_option(rs.option.safety_mode) != rs.safety_mode.service:
+            # Will throw on failure — intentional so we fail the test rather than run without service mode.
+            safety_sensor.set_option(rs.option.safety_mode, rs.safety_mode.service)
     yield dev, ctx
+    if safety_sensor is not None:
+        try:
+            safety_sensor.set_option(rs.option.safety_mode, rs.safety_mode.run)
+        except Exception as e:
+            # Best-effort: don't mask test failures, and the device may already be reset by teardown time.
+            log.warning(f"safety_mode restore skipped for {sn}: {e}")

@@ -16,6 +16,68 @@
 
 namespace rs2
 {
+    // --- subdevice_model::config_save_worker ---------------------------------------------------
+    // Defined out-of-line; the class is declared as a private nested type in subdevice-model.h.
+
+    subdevice_model::config_save_worker & subdevice_model::config_save_worker::instance()
+    {
+        static config_save_worker w;
+        return w;
+    }
+
+    subdevice_model::config_save_worker::config_save_worker()
+        : _worker( [this] { run(); } )
+    {
+    }
+
+    subdevice_model::config_save_worker::~config_save_worker()
+    {
+        {
+            std::lock_guard< std::mutex > lk( _mtx );
+            _stop = true;
+        }
+        _cv.notify_one();
+        if( _worker.joinable() ) _worker.join();
+    }
+
+    void subdevice_model::config_save_worker::post( void * key, std::function< void() > job )
+    {
+        {
+            std::lock_guard< std::mutex > lk( _mtx );
+            _pending[key] = std::move( job );
+        }
+        _cv.notify_one();
+    }
+
+    void subdevice_model::config_save_worker::cancel( void * key )
+    {
+        std::lock_guard< std::mutex > lk( _mtx );
+        _pending.erase( key );
+    }
+
+    void subdevice_model::config_save_worker::run()
+    {
+        for( ;; )
+        {
+            std::vector< std::function< void() > > jobs;
+            bool stopping = false;
+            {
+                std::unique_lock< std::mutex > lk( _mtx );
+                _cv.wait( lk, [this] { return _stop || ! _pending.empty(); } );
+                stopping = _stop;
+                for( auto & kv : _pending ) jobs.push_back( std::move( kv.second ) );
+                _pending.clear();
+            }
+            for( auto & job : jobs )
+            {
+                try { job(); } catch( ... ) {}
+            }
+            if( stopping ) return;
+        }
+    }
+
+    // -------------------------------------------------------------------------------------------
+
     std::vector<const char*> get_string_pointers(const std::vector<std::string>& vec)
     {
         std::vector<const char*> res;
@@ -82,8 +144,16 @@ namespace rs2
         y411(std::make_shared<rs2::gl::y411_decoder>()),
         viewer(viewer),
         detected_objects(device_detected_objects),
-        _destructing( false )
+        _destructing( false ),
+        // Queue capacity is generous: even rapid slider drags coalesce into at most one
+        // queued job per option (see option_model::set_option_async), so realistically
+        // depth ≪ 16.
+        _set_dispatcher( std::make_shared< dispatcher >( 64u ) )
     {
+        // dispatcher's worker thread starts in _was_stopped=true; invoke() is a
+        // silent no-op until start() is called. (The header comment claiming it
+        // "starts out 'started'" disagrees with the constructor in src/dispatcher.cpp.)
+        _set_dispatcher->start();
         supported_options = s->get_supported_options();
         restore_processing_block("colorizer", depth_colorizer);
         restore_processing_block("yuy2rgb", yuy2rgb);
@@ -291,6 +361,18 @@ namespace rs2
             depth_colorizer->set_option(RS2_OPTION_VISUAL_PRESET, option_value);
         }
 
+        // Disable histogram equalization for D585 prototype variants (0C07, 0C08).
+        // Must be applied AFTER the VISUAL_PRESET restore block above: re-setting the Dynamic
+        // preset (default) re-enables histogram equalization via its on_set callback.
+        if (s->supports(RS2_CAMERA_INFO_PRODUCT_ID))
+        {
+            std::string device_pid = s->get_info(RS2_CAMERA_INFO_PRODUCT_ID);
+            if (device_pid == "0C07" || device_pid == "0C08")
+            {
+                depth_colorizer->set_option(RS2_OPTION_HISTOGRAM_EQUALIZATION_ENABLED, 0.f);
+            }
+        }
+
         std::stringstream ss;
         ss << "##" << dev.get_info(RS2_CAMERA_INFO_NAME)
             << "/" << s->get_info(RS2_CAMERA_INFO_NAME)
@@ -320,6 +402,7 @@ namespace rs2
             std::map<int, rs2_format> def_format{ {0, RS2_FORMAT_ANY} };
             auto default_resolution = std::make_pair(1280, 720);
             auto default_fps = 30;
+            std::map<int, int> def_fps_per_stream;   // per-stream default-profile FPS (by unique_id)
             for (auto&& profile : sensor_profiles)
             {
                 std::stringstream res;
@@ -371,6 +454,7 @@ namespace rs2
                 {
                     stream_enabled[profile.unique_id()] = true;
                     def_format[profile.unique_id()] = profile.format();
+                    def_fps_per_stream[profile.unique_id()] = profile.fps();
                 }
 
                 profiles.push_back(profile);
@@ -393,24 +477,36 @@ namespace rs2
             }
             sort_together(res_values, resolutions);
 
-            show_single_fps_list = is_there_common_fps();
+            // Compute common FPS once and reuse it for mode decision and shared default (video streams)
+            auto common_fps = get_common_fps();
+            show_single_fps_list = !common_fps.empty() && !res_values.empty();
 
             int selection_index{};
 
             if (!show_single_fps_list)
             {
-                for (auto fps_array : fps_values_per_stream)
+                // Each stream gets its own FPS selection. Prefer the stream's own default-profile FPS.
+                // Assign for every stream so all land on a valid profile.
+                for (const auto& fps_array : fps_values_per_stream)
                 {
-                    if (get_default_selection_index(fps_array.second, default_fps, &selection_index))
-                    {
-                        ui.selected_fps_id[fps_array.first] = selection_index;
-                        break;
-                    }
+                    if (fps_array.second.empty())
+                        continue;
+                    auto def_it = def_fps_per_stream.find(fps_array.first);
+                    int stream_default = (def_it != def_fps_per_stream.end()) ? def_it->second : default_fps;
+                    get_default_selection_index(fps_array.second, stream_default, &selection_index);
+                    ui.selected_fps_id[fps_array.first] = selection_index;
                 }
             }
             else
             {
-                if (get_default_selection_index(shared_fps_values, default_fps, &selection_index))
+                // The single shared FPS is applied to all streams, so the default must be a
+                // value every stream supports. Prefer default_fps when it's common; otherwise
+                // fall back to the highest common FPS (the union's min/max may not be common -
+                // e.g. motion's union {100,200,400} where only 200 is common).
+                int desired = default_fps;
+                if (std::find(common_fps.begin(), common_fps.end(), default_fps) == common_fps.end())
+                    desired = *std::max_element(common_fps.begin(), common_fps.end());
+                if (get_default_selection_index(shared_fps_values, desired, &selection_index))
                     ui.selected_shared_fps_id = selection_index;
             }
 
@@ -472,6 +568,13 @@ namespace rs2
 
     subdevice_model::~subdevice_model()
     {
+        // cancel() drops any not-yet-started save job for this subdevice. If the
+        // worker has already dequeued and is running our lambda, cancel is a no-op —
+        // but that's safe because the lambda intentionally captures only shared_ptrs
+        // to the processing blocks (by value), never `this`. So `subdevice_model`'s
+        // dtor doesn't need to wait for the worker; the in-flight save will finish on
+        // its own without dereferencing any member of *this.
+        config_save_worker::instance().cancel( this );
         _destructing = true;
         try
         {
@@ -525,33 +628,46 @@ namespace rs2
             });
     }
 
-    bool subdevice_model::is_there_common_fps()
+    // Returns the FPS values supported by every (non-empty) stream of this subdevice - the
+    // intersection of the per-stream FPS lists. e.g. depth/IR expose {90,30,25,20,15,5} and a
+    // color stream exposes {30,25,20,15} -> common {30,25,20,15}; accel {100,200} and gyro
+    // {200,400} -> common {200}. Empty when the streams share no rate (per-stream FPS needed).
+    std::vector<int> subdevice_model::get_common_fps() const
     {
-        std::vector<int> first_fps_group;
-        size_t group_index = 0;
-        for (; group_index < fps_values_per_stream.size(); ++group_index)
+        std::vector<int> common;
+        bool first = true;
+        for (auto&& kvp : fps_values_per_stream)
         {
-            if (!fps_values_per_stream[(rs2_stream)group_index].empty())
-            {
-                first_fps_group = fps_values_per_stream[(rs2_stream)group_index];
-                break;
-            }
-        }
-
-        for (size_t i = group_index + 1; i < fps_values_per_stream.size(); ++i)
-        {
-            auto fps_group = fps_values_per_stream[(rs2_stream)i];
+            const auto& fps_group = kvp.second;
             if (fps_group.empty())
                 continue;
 
-            auto fps1 = first_fps_group[0];
-            auto it = std::find_if( std::begin( fps_group ),
-                                    std::end( fps_group ),
-                                    [&]( const int & fps2 ) { return fps2 == fps1; } );
-            if( it == std::end( fps_group ) )
-                return false;
+            if (first)
+            {
+                common = fps_group;
+                first = false;
+                continue;
+            }
+
+            // keep only the values from common that also appear in this stream's list
+            std::vector<int> updated;
+            for (auto fps : common)
+            {
+                if (std::find(fps_group.begin(), fps_group.end(), fps) != fps_group.end())
+                    updated.push_back(fps);
+            }
+            common = updated;
         }
-        return true;
+        return common;
+    }
+
+    // A single shared FPS list can be presented only if all the streams share at least one
+    // common FPS value. We intersect the per-stream lists rather than testing a single value:
+    // the old check compared only one stream's extreme value (e.g. 90 or 5), which the others
+    // lack, and wrongly concluded there was no common FPS.
+    bool subdevice_model::is_there_common_fps()
+    {
+        return !get_common_fps().empty();
     }
 
     bool subdevice_model::draw_resolutions(std::string& error_message, std::string& label, std::function<void()> streaming_tooltip, float col0, float col1)
@@ -1798,21 +1914,45 @@ namespace rs2
     }
     void subdevice_model::update(std::string& error_message, notifications_model& notifications)
     {
-        if (_options_invalidated)
+        // Two paths below are throttled while the user is actively writing options
+        // (last_user_set_stopwatch < 500 ms):
+        //   - the _options_invalidated branch posts a JSON-config save job, which is
+        //     fine to skip during a drag (the worker coalesces anyway).
+        //   - the per-frame get_option_value() polling shares the per-device USB bus
+        //     with our async option-write worker and with options_watcher's 1 s poll
+        //     cycle, so polling here would reintroduce the UI freeze the async dispatch
+        //     is meant to fix.
+        // The gate is scoped to just these two paths so that any other logic added to
+        // update() in the future (or below this point) is not silently throttled.
+        // `value` stays fresh during the gate via options_watcher -> on_options_changed.
+        const bool user_writing = last_user_set_stopwatch.get_elapsed_ms() < 500;
+
+        if (!user_writing && _options_invalidated)
         {
             next_option = 0;
             _options_invalidated = false;
 
-            save_processing_block_to_config_file("colorizer", depth_colorizer);
-            save_processing_block_to_config_file("yuy2rgb", yuy2rgb);
-            save_processing_block_to_config_file("m420_to_rgb", m420_to_rgb);
-            save_processing_block_to_config_file("nv12_to_rgb", nv12_to_rgb);
-            save_processing_block_to_config_file("y411", y411);
-
-            for (auto&& pbm : post_processing) pbm->save_to_config_file();
+            // Capture by value so the worker stays UAF-safe even if `this` dies mid-save.
+            // shared_ptrs keep the underlying processing blocks alive until the job runs.
+            auto colorizer = depth_colorizer;
+            auto yuy2      = yuy2rgb;
+            auto m420      = m420_to_rgb;
+            auto nv12      = nv12_to_rgb;
+            auto y411_ptr  = y411;
+            auto pp        = post_processing;
+            config_save_worker::instance().post( this,
+                [ colorizer, yuy2, m420, nv12, y411_ptr, pp ]
+                {
+                    save_processing_block_to_config_file( "colorizer",   colorizer );
+                    save_processing_block_to_config_file( "yuy2rgb",     yuy2 );
+                    save_processing_block_to_config_file( "m420_to_rgb", m420 );
+                    save_processing_block_to_config_file( "nv12_to_rgb", nv12 );
+                    save_processing_block_to_config_file( "y411",        y411_ptr );
+                    for( auto & pbm : pp ) pbm->save_to_config_file();
+                } );
         }
 
-        if (next_option < supported_options.size())
+        if (!user_writing && next_option < supported_options.size())
         {
             auto next = supported_options[next_option];
             if (options_metadata.find(static_cast<rs2_option>(next)) != options_metadata.end())
